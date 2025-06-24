@@ -53,7 +53,7 @@ Your training dataset should contain:
 
 ### Evaluation
 
-Evaluate your trained model with `evaluate_cross_encoder.py`:
+Evaluate your trained model with `evaluate.py`:
 
 ```bash
 python evaluate.py \
