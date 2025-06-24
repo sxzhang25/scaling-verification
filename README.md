@@ -1,7 +1,7 @@
 <div align="center">
     <img src="assets/weaver-logo.png" height=450 alt="Weaver Logo"/>
   
-  [![GitHub](https://img.shields.io/github/license/HazyResearch/weaver)](https://github.com/hazyresearch/scaling-verification/blob/main/LICENSE)
+  [![GitHub](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/hazyresearch/scaling-verification/blob/main/LICENSE)
   [![arXiv](https://img.shields.io/badge/arXiv-2506.18203-b31b1b.svg)](https://arxiv.org/abs/2506.18203)
 </div>
 
