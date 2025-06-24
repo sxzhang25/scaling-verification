@@ -1,0 +1,92 @@
+# Weaver Configuration for MATH-500 Dataset with 70B Model
+# For detailed parameter descriptions, see selection/README.md
+
+verifier_cfg:
+  verifier_type: "all" # Options: "reward_models", "judges", "all"
+  verifier_size: "all" # Options: "all", "small", "medium", "large", or integer
+  verifier_subset: [] # Optional: specific verifier names to use
+
+data_cfg:
+  dataset_name: "MATH-500" # Options: "MATH-500", "MMLU-Pro", "MMLU", "GPQA", "GPQA-Diamond", "GPQA-1K"
+  train_split: 1.0 # 1.0 = no test set, <1.0 = fraction for training
+  train_queries: 1 # Fraction or number of training queries to use
+  train_samples: 1 # Fraction of samples per problem to use
+  same_train_test: false
+  nan_replacement: 0 # Replace NaN with: 0 or "mean"
+  random_seed: 0
+  model_size: "70B" # For dataset selection: "8B" or "70B"
+  reward_threshold: 0.95 # Binarization threshold, null = no threshold
+  save_weaver_scores: false # Save Weaver scores to dataset
+  
+  # Score normalization
+  normalize_type: "all_problems" # Options: "per_problem", "all_problems"
+  normalize_method: "minmax" # Options: "minmax", "quantile", "winsorize"
+  normalize_params: ${normalize_method_params.${data_cfg.normalize_method}}
+  
+  # Problem similarity (for per-problem models)
+  closest_train_problem_method: "mean_verifier_distance" # Options: "SBERT", "mean_verifier_distance"
+  closest_train_problem_metric_type: "euclidean" # Options: "cosine", "euclidean"
+  
+  verifier_cfg: ${verifier_cfg}
+  mv_as_verifier: true # Include majority vote as a verifier
+  fixed_test_split: null # Optional: fixed test set independent of train_split
+
+debug: false
+
+model_cfg:
+  model_type: "weak_supervision" # Options: see model_params section
+  model_class: "cluster" # Options: "cluster", "per_problem", "per_dataset"
+  model_params: ${model_params.${model_cfg.model_type}}
+  cluster_cfg:
+    n_clusters: 1 # Number of clusters
+    cluster_type: "unique_extracted_answers" # Clustering method
+    preserve_ties: true # Preserve tied difficulty levels
+    uniform_with_ties: false # Maintain uniform cluster sizes
+
+fit_cfg:
+  fit_type: "wclosest_to_train" # Options: "wclosest_to_train", "search_weights"
+
+logging: "wandb"
+wandb_cfg:
+  project: "verification"
+  entity: "${oc.env:WANDB_ENTITY}"
+
+# Model-specific parameters
+model_params:
+  weak_supervision:
+    k: 2 # Number of classes
+    seed: 0
+    binarize_threshold: 0.5
+    metric: "scores"
+    n_epochs: 1000
+    mu_epochs: 1000
+    log_train_every: 1000
+    lr: 0.00001
+    deps_density: 0.1
+    use_deps: "none" # Options: "none", "drop", "model"
+    deps_data_fraction: 1.0
+    use_label_on_test: true
+    drop_imbalanced_verifiers: "small" # Options: null, "all", "small", "large"
+    drop_k: 100
+    use_tensor_decomp: false
+    cb_args:
+      class_balance: "labels" # Options: "labels" or float value
+
+  naive_ensemble:
+    tmp: # No parameters required
+    
+  first_sample:
+    tmp: # No parameters required
+
+# Normalization method parameters
+normalize_method_params:
+  minmax:
+    tmp: # No parameters required
+    
+  quantile:
+    output_distribution: "uniform"
+    n_quantiles: 100
+    
+  winsorize:
+    lower_quantile: 0.05
+    upper_quantile: 0.95

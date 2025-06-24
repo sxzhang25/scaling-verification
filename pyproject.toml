@@ -1,0 +1,171 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel", "torch>=2.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weaver"
+version = "0.1.0"
+description = "Weaver: Shrinking the Generation-Verification Gap with Weak Verifiers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Jon Saad-Falcon"},
+    {name = "E. Kelly Buchanan"},
+    {name = "Mayee F Chen"},
+    {name = "Tzu-Heng Huang"},
+    {name = "Brendan McLaughlin"},
+    {name = "Tanvir Bhathal"},
+    {name = "Shang Zhu"},
+    {name = "Ben Athiwaratkun"},
+    {name = "Frederic Sala"},
+    {name = "Scott Linderman"},
+    {name = "Azalia Mirhoseini"},
+    {name = "Christopher Re"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # Core ML/AI libraries
+    "torch>=2.0.0",
+    "torchvision",
+    "torchaudio",
+    "transformers[torch]>=4.20.0", 
+    "datasets>=3.0.0",
+    "huggingface-hub>=0.20.0",
+    "tokenizers>=0.15.0",
+    "safetensors>=0.4.0",
+    
+    # Scientific computing
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.3.0",
+    "pandas>=2.0.0",
+    
+    # Configuration and experiment management
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "wandb>=0.15.0",
+    
+    # API clients
+    "openai>=1.0.0",
+    "together>=1.0.0",
+    "anthropic>=0.53.0",
+    "groq>=0.26.0",
+    "google-genai>=1.19.0",
+    "litellm>=1.72.3",
+    
+    # Inference and model serving
+    "vllm>=0.4.0",
+    "ray>=2.8.0",
+    
+    # Sentence transformers for distillation
+    "sentence-transformers>=3.0.0",
+    
+    # Utilities
+    "tqdm>=4.65.0",
+    "loguru>=0.7.0",
+    "tabulate>=0.9.0",
+    "requests>=2.28.0",
+    "pydantic>=2.0.0",
+    "typer>=0.9.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "python-dotenv>=1.0.0",
+    
+    # Development and testing
+    "pytest>=7.0.0",
+    "ipython>=8.0.0",
+    
+    # Visualization and logging
+    "matplotlib>=3.6.0",
+    "seaborn>=0.12.0",
+    "tensorboardx>=2.6.0",
+    
+    # Additional utilities from original requirements
+    "joblib>=1.4.0",
+    "opencv-python-headless>=4.8.0",
+    "einops>=0.7.0",
+    "tiktoken>=0.5.0",
+    "regex>=2023.0.0",
+    
+    # System monitoring
+    "psutil>=5.9.0",
+    "gputil>=1.4.0",
+    "pynvml>=11.0.0",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "flash-attn>=2.8.0.post2"
+]
+
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+]
+
+full = [
+    "jupyter",
+    "jupyterlab",
+    "notebook",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/weaver"
+Repository = "https://github.com/your-org/weaver"
+Documentation = "https://github.com/your-org/weaver"
+
+[project.scripts]
+weaver = "weaver.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["weaver*", "generation*", "selection*", "distillation*"]
+exclude = ["tests*", "scripts*", "experiments*", "metal-ama*"]
+
+[tool.setuptools.package-data]
+weaver = ["*.yaml", "*.yml", "*.json"]
+selection = ["configs/**/*.yaml", "configs/**/*.yml"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  metal-ama
+  | experiments
+  | scripts
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

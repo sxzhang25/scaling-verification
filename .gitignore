@@ -1,0 +1,35 @@
+# Byte-compiled / cache
+__pycache__/
+*/__pycache__/
+*.py[cod]
+
+# Distribution/build folders
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# dotenv file (contains secrets/credentials)
+.env
+
+# Custom output directories
+cluster_mapping/
+outputs/
+wandb/
+metal-ama/
+selection/figures/
+
+# macOS Finder metadata
+.DS_Store
+
+datasets/
+checkpoints/
+
+# Log and run files
+*.log
+*.out
+*.err

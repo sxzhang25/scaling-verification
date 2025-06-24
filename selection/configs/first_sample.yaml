@@ -1,0 +1,70 @@
+verifier_cfg:
+  verifier_type: "all"
+  verifier_size: "all"
+  verifier_subset: []
+
+data_cfg:
+  dataset_name: "MATH-500" # Options: "MATH-500", "MMLU-Pro", "MMLU", "GPQA", "GPQA-Diamond", "GPQA-1K"
+  train_split: 1.0
+  train_queries: 1
+  train_samples: 1
+  
+  # Data preprocessing
+  nan_replacement: 0
+  random_seed: 0
+  model_size: "70B"
+  reward_threshold: null
+
+  save_weaver_scores: false # Save Weaver scores as column in local dataset
+  
+  # Normalization (not used but required)
+  normalize_type: "all_problems"
+  normalize_method: "minmax"
+  normalize_params: ${normalize_method_params.${data_cfg.normalize_method}}
+  
+  # Similarity metrics (not used but required)
+  closest_train_problem_method: "mean_verifier_distance"
+  closest_train_problem_metric_type: "euclidean"
+  
+  verifier_cfg: ${verifier_cfg}
+  mv_as_verifier: false
+  fixed_test_split: null
+  same_train_test: false
+
+debug: false
+
+model_cfg:
+  model_type: "first_sample"
+  model_class: "per_dataset"
+  model_params: ${model_params.${model_cfg.model_type}}
+
+fit_cfg:
+  fit_type: "wclosest_to_train"
+
+logging: "wandb"
+wandb_cfg:
+  project: "verification"
+  entity: "${oc.env:WANDB_ENTITY}"
+
+model_params:
+  first_sample:
+    tmp:
+    # No parameters needed - always selects first sample
+    
+  # Keep other model params for completeness
+  majority_vote:
+    k: 1
+    majority_select: "one_sample"
+    
+  naive_ensemble:
+    # No parameters needed
+
+normalize_method_params:
+  minmax:
+    # No parameters needed
+  quantile:
+    output_distribution: "uniform"
+    n_quantiles: 100
+  winsorize:
+    lower_quantile: 0.05
+    upper_quantile: 0.95

@@ -1,0 +1,92 @@
+# Supervised Learning Configuration (Logistic Regression/Naive Bayes)
+# For detailed parameter descriptions, see selection/README.md
+
+verifier_cfg:
+  verifier_type: "all" # Options: "reward_models", "judges", "all"
+  verifier_size: "all" # Options: "all", "small", "medium", "large", or integer
+  verifier_subset: [] # Optional: specific verifier names to use
+
+data_cfg:
+  dataset_name: "MATH-500" # Options: "MATH-500", "MMLU-Pro", "MMLU", "GPQA", "GPQA-Diamond", "GPQA-1K"
+  train_split: 1.0 # 1.0 = no test set, <1.0 = fraction for training
+  train_queries: 1 # Fraction or number of training queries to use
+  train_samples: 1 # Fraction of samples per problem to use
+  test_samples: 1 # Fraction of samples per problem for testing
+  nan_replacement: 0 # Replace NaN with: 0 or "mean"
+  random_seed: 0
+  model_size: "70B" # For dataset selection: "8B" or "70B"
+  reward_threshold: null # Binarization threshold, null = no threshold
+  save_weaver_scores: false # Save Weaver scores to dataset
+  
+  # Score normalization
+  normalize_type: "all_problems" # Options: "per_problem", "all_problems"
+  normalize_method: "minmax" # Options: "minmax", "quantile", "winsorize"
+  normalize_params: ${normalize_method_params.${data_cfg.normalize_method}}
+  
+  # Problem similarity
+  closest_train_problem_method: "mean_verifier_distance" # Options: "SBERT", "mean_verifier_distance"
+  closest_train_problem_metric_type: "euclidean" # Options: "cosine", "euclidean"
+  
+  verifier_cfg: ${verifier_cfg}
+  mv_as_verifier: true # Include majority vote as verifier
+  fixed_test_split: null
+  same_train_test: false
+  train_split_bins: 10 # How to slice data for train/test split
+  shuffle_samples: true # Shuffle samples in train and test split
+  drop_imbalanced_verifiers: null # Options: null, "all"
+  max_num_independent_verifiers: null
+
+debug: false
+
+model_cfg:
+  model_type: "logistic_regression" # Options: "naive_bayes", "logistic_regression"
+  model_class: "cluster" # Options: "per_problem", "per_dataset", "cluster"
+  model_params: ${model_params.${model_cfg.model_type}}
+  cluster_cfg:
+    n_clusters: 2 # Number of clusters
+    cluster_type: "unique_extracted_answers" # Options: "by_difficulty", "random", "unique_extracted_answers"
+    preserve_ties: true # Preserve tied difficulty levels
+    uniform_with_ties: false # Maintain uniform cluster sizes
+    cluster_on_all: true
+
+fit_cfg:
+  fit_type: "wclosest_to_train" # Options: "wclosest_to_train", "search_weights"
+
+logging: "wandb"
+wandb_cfg:
+  project: "verification"
+  entity: "${oc.env:WANDB_ENTITY}"
+
+# Model-specific parameters
+model_params:
+  logistic_regression:
+    random_state: 42
+    max_iter: 1000
+    penalty: "l2"
+    class_weight: "balanced"
+    solver: "newton-cholesky"
+
+  naive_bayes:
+    binarize_threshold: 0.5
+    clip_min: 0.0
+    clip_max: 1.0
+    use_deps: "drop" # Options: "drop", "model"
+    drop_imbalanced_verifiers: "all" # Options: null, "all", "small", "large"
+    drop_k: 3 # Number of verifiers to drop
+
+# Normalization method parameters
+normalize_method_params:
+  minmax:
+    tmp: # No parameters required
+    
+  quantile:
+    output_distribution: "uniform"
+    n_quantiles: 100
+    
+  winsorize:
+    lower_quantile: 0.0
+    upper_quantile: 1.0
+    
+  quantile_minmax:
+    output_distribution: "normal"
+    n_quantiles: 100
