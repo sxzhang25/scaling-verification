@@ -22,7 +22,7 @@ You can access our released datasets on Hugging Face. For details on the dataset
 - [MMLU-Pro with Llama-3.1-8B-Instruct](https://huggingface.co/datasets/hazyresearch/MMLU-Pro_with_Llama_3.1_8B_Instruct_v1)
 - [MMLU-Pro with Llama-3.1-70B-Instruct](https://huggingface.co/datasets/hazyresearch/MMLU-Pro_with_Llama_3.1_70B_Instruct_v1)
 
-[View all datasets →](https://huggingface.co/hazyresearch)
+[View all datasets →](https://huggingface.co/collections/hazyresearch/weaver-683798010b39c9653ddb9bd8)
 
 ```python
 from datasets import load_dataset
