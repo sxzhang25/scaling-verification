@@ -126,9 +126,9 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/weaver"
-Repository = "https://github.com/your-org/weaver"
-Documentation = "https://github.com/your-org/weaver"
+Homepage = "https://github.com/HazyResearch/scaling-verification"
+Repository = "https://github.com/HazyResearch/scaling-verification"
+Documentation = "https://github.com/HazyResearch/scaling-verification"
 
 [project.scripts]
 weaver = "weaver.cli:main"
