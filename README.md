@@ -19,7 +19,7 @@ Weaver is a framework for designing a strong verifier by combining multiple weak
 
 **1. Clone the repository:**
 ```bash
-git clone https://github.com/ScalingIntelligence/scaling-verification.git
+git clone https://github.com/HazyResearch/scaling-verification.git
 cd scaling-verification
 ```
 
