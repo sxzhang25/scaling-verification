@@ -833,7 +833,7 @@ class VerificationDataset:
             raise ValueError(f"Unknown verifier type: {self.verifier_cfg.verifier_type}")
 
         # Subselect by size as well
-        verifier_sizes = [VERIFIER_DESCRIPTIONS[v]["num_parameters"] for v in verifier_names]
+        verifier_sizes = [VERIFIER_DESCRIPTIONS[v]["num_parameters"] for v in verifier_names if v != "weaver_scores"]
         verifier_size = self.verifier_cfg.get("verifier_size", "all")
         if type(verifier_size) == str:
             if verifier_size == "all":
