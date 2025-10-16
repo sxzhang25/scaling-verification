@@ -135,7 +135,7 @@ def calculate_sample_metrics(probs, y, return_flat=True):
     assert probs.shape[0] == y.shape[0]
 
     # For each sample, calculate the accuracy of the prediction
-    selected_cls_per_sample = np.argmax(probs, axis=1) 
+    selected_cls_per_sample = np.argmax(probs, axis=1)
     accuracy = (y == selected_cls_per_sample).astype(int)
 
     # Calculate the TPR and TNR
@@ -1338,8 +1338,9 @@ class WeakSupervised(LabelModel):
                 log_train_every=self.log_train_every,
                 lr=self.lr,
                 **cb_inputs, # the class balance Pr(y = 1) is either set to a hardcoded value or computed from labeled data
-                )
-            
+            )
+            # print("mu:", self.mu.shape, self.mu)
+
             n_verifiers = X.shape[-1]
             TPR, TNR, FPR, FNR = self._get_ws_estimated_verifier_class_accuracies(n_verifiers)
             # print(f"WS TPR: {TPR}, WS TNR: {TNR}", flush=True)
@@ -1403,6 +1404,20 @@ class WeakSupervised(LabelModel):
    
         logging.info(f"Data used in fit: Num samples {X.shape[0]}, Num verifiers {X.shape[1]}")
         logging.info(f"Verifiers used in fit: N={len(self.verifier_idxs)}: {[self.verifier_names[i] for i in self.verifier_idxs]}")
+        
+        print(80 * "-")
+        print(f"{'Verifier Name':<50} | {'P(S=0|Y=0)':<10} | {'P(S=1|Y=1)':<10}")
+        print(80 * "-")
+        for i, v_idx in enumerate(self.verifier_idxs):
+            verifier_name = self.verifier_names[v_idx]
+            if verifier_name.startswith('VerifierType'):
+                verifier_name = self.verifier_names[v_idx].split('.')[1]
+            if verifier_name.startswith('~VerifierType'):
+                verifier_name = "~" + self.verifier_names[v_idx].split('.')[1]
+            p_s0_y0 = self.mu[2 * i, 0]
+            p_s1_y1 = self.mu[2 * i + 1, 1]
+            print(f"{verifier_name:<50} | {p_s0_y0:<10.2f} | {p_s1_y1:<10.2f}")
+        print(80 * "-")
 
     def predict_proba(self, X):
         X = X[:, self.verifier_idxs] # use only the verifiers that were used to fit the model
