@@ -1,4 +1,5 @@
 import os
+import h5py
 import numpy as np
 import pandas as pd
 from datasets import load_dataset, load_from_disk
@@ -21,6 +22,22 @@ from sklearn.cluster import KMeans
 from collections import defaultdict
 import warnings
 import itertools
+
+def create_df_from_h5(h5_path: str, verifiers_path: str = None):
+    verifiers_list = None
+    if verifiers_path is not None:
+        with open(verifiers_path, 'r') as f:
+            verifier_names = f.read().splitlines()
+        verifiers_list = [v.strip() for v in verifier_names]
+    with h5py.File(h5_path, 'r') as h5f:
+        data = {key: h5f[key][:].tolist() for key in h5f.keys() if key != 'verifier'}
+
+        if verifiers_list is None:
+            verifiers_list = list(h5f['verifier'].keys())
+        for verifier_name in verifiers_list:
+            data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
+
+    return pd.DataFrame(data)
 
 
 def from_cluster_list_to_dict(labels):
@@ -781,7 +798,14 @@ class VerificationDataset:
             # Users can pass local or remote dataset
             try:
                 if os.path.exists(self.dataset_path):
-                    df = pd.DataFrame(load_from_disk(self.dataset_path))
+                    # If the dataset path is a parquet file, load using HF dataset from parquet
+                    if self.dataset_path.endswith(".parquet"):
+                        df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
+                    elif self.dataset_path.endswith(".h5"):
+                        assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
+                        df = create_df_from_h5(self.dataset_path, self.verifier_cfg.verifier_subset)
+                    else:
+                        df = pd.DataFrame(load_from_disk(self.dataset_path))
                 else:
                     df = pd.DataFrame(load_dataset(self.dataset_path)["data"])
 
@@ -829,11 +853,13 @@ class VerificationDataset:
         elif self.verifier_cfg.verifier_type == "specific_subset":
             verifier_names = self.verifier_cfg.verifier_subset
             assert all(v in all_reward_models + all_judges for v in verifier_names), f"Unknown verifiers: {verifier_names} from list {all_reward_models + all_judges}"
+        elif self.verifier_cfg.verifier_type == "auto":
+            verifier_names = [c for c in df.columns if c not in ['instruction', 'samples', 'answer_correct']]
         else:
             raise ValueError(f"Unknown verifier type: {self.verifier_cfg.verifier_type}")
 
         # Subselect by size as well
-        verifier_sizes = [VERIFIER_DESCRIPTIONS[v]["num_parameters"] for v in verifier_names if v != "weaver_scores"]
+        verifier_sizes = [VERIFIER_DESCRIPTIONS[v]["num_parameters"] for v in verifier_names if (v != "weaver_scores" and v in VERIFIER_DESCRIPTIONS)]
         verifier_size = self.verifier_cfg.get("verifier_size", "all")
         if type(verifier_size) == str:
             if verifier_size == "all":
@@ -1028,7 +1054,7 @@ class VerificationDataset:
         df['mv_verifier'] = mv_data
         return df
 
-    def setup(self):
+    def setup(self, verifier_names: list[str] = None):
         """Loads dataset, extracts verifier scores, and prepares training/testing splits."""
         # we want to load the task data
         df, correct_key, all_verifiers = self.load_task_data()

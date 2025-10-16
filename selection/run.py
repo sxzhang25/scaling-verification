@@ -1,10 +1,11 @@
 import os
+import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf
-from weaver.dataset import VerificationDataset, ClusteringDataset
+from weaver.dataset import VerificationDataset, ClusteringDataset, create_df_from_h5
 from weaver.models import Model
 import wandb
 os.environ["WANDB_SILENT"] = "true"
@@ -18,6 +19,34 @@ from datasets import load_dataset, load_from_disk, Dataset, DatasetDict
 FIGURES_DIR = Path("figures")
 FIGURES_DIR.mkdir(exist_ok=True)
 
+# TODO: implement this
+def save_weaver_model(model, args):
+    """Save Weaver model to dataset."""
+    if model.model_type != "weak_supervision":
+        return
+
+    # Create pickle with all model params.
+    model_params = {}
+
+    # def predict_proba(self, X):
+    #     X = X[:, self.verifier_idxs] # use only the verifiers that were used to fit the model
+    #     if self.use_continuous:
+    #         probs = np.zeros((X.shape[0], 2))
+    #         for i in range(X.shape[0]):
+    #             prob = np.expand_dims(self.Sigma_hat[self.m, :self.m], axis=0) \
+    #                                 .dot(np.linalg.inv(self.Sigma_hat[:self.m, :self.m])) \
+    #                                 .dot(np.expand_dims(X[i, :self.m], axis=1))
+    #             probs[i, 0] = 1 - prob.item()
+    #             probs[i, 1] = prob.item()
+    #         return probs
+    #     else:
+    #         return super().predict_proba(X)
+    
+
+    output_path =f'{os.path.splitext(args.data_cfg.dataset_path)[0]}_model.pkl'
+    with open(output_path, "wb") as f:
+        pickle.dump(model_params, f)
+
 def save_weaver_scores_to_dataset(data, model, all_test_results, args):
     """Save Weaver scores/probabilities to dataset for distillation."""
         
@@ -29,7 +58,12 @@ def save_weaver_scores_to_dataset(data, model, all_test_results, args):
     print("Saving Weaver scores to dataset...")
     
     if os.path.exists(dataset_path):
-        df = pd.DataFrame(load_from_disk(dataset_path))
+        if dataset_path.endswith(".parquet"):
+            df = pd.DataFrame(load_dataset("parquet", data_files=dataset_path)['train'])
+        elif dataset_path.endswith(".h5"):
+            df = create_df_from_h5(dataset_path, args.verifier_cfg.verifier_subset)
+        else:
+            df = pd.DataFrame(load_from_disk(dataset_path))
     else:
         df = pd.DataFrame(load_dataset(dataset_path)["data"])
 
@@ -68,7 +102,11 @@ def save_weaver_scores_to_dataset(data, model, all_test_results, args):
     
     if os.path.exists(dataset_path):
         # If this is a local dataset, add the scores directly to the dataset on disk
-        DatasetDict({"data": modified_dataset}).save_to_disk(dataset_path)
+        if dataset_path.endswith('.parquet') or dataset_path.endswith('.h5'):
+            dataset_path = '/'.join(dataset_path.split('/')[:-1])
+            DatasetDict({"data": modified_dataset}).save_to_disk(dataset_path)
+        else:
+            DatasetDict({"data": modified_dataset}).save_to_disk(dataset_path)
         print(f"Added weavers scores to local dataset {data.dataset_name} with path {dataset_path}")
     else:
         # This is a hub dataset, add the weaver scores there
@@ -191,6 +229,14 @@ def train_and_evaluate(data, model, fit_cfg):
                 
         elif model.model_class in ["per_dataset"]:
             model.fit(X_train, y_train)
+            # print("model:", model)
+            # print("model \mu:", model.mu)
+            # Print all instance class attributes of model
+            # console.print("[cyan]Model instance attributes:[/cyan]")
+            # for attr in dir(model):
+            #     # Exclude methods and built-in attributes
+            #     if not attr.startswith("__") and not callable(getattr(model, attr)):
+            #         console.print(f"  {attr}: {getattr(model, attr)}")
             
         elif model.model_class == "per_dataset_cluster":
             cluster_idxs = model.clusters.train_cluster_idxs
@@ -492,6 +538,9 @@ def train(args):
     
     if args.data_cfg.get('save_weaver_scores', False):
         save_weaver_scores_to_dataset(data, model, df_test, args)
+
+    if args.data_cfg.get('save_weaver_model', False):
+        save_weaver_model(model, df_test, args)
         
     if wandb.run:
             wandb_url = wandb.run.get_url()
