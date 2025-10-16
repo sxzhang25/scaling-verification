@@ -2,9 +2,9 @@
 # For detailed parameter descriptions, see selection/README.md
 
 verifier_cfg:
-  verifier_type: "all" # Options: "reward_models", "judges", "all"
+  verifier_type: "all" # Options: "reward_models", "judges", "all", "auto"
   verifier_size: "all" # Options: "all", "small", "medium", "large", or integer
-  verifier_subset: [] # Optional: specific verifier names to use
+  verifier_subset: [] # Optional: specific verifier names to use, or path to txt file
 
 data_cfg:
   dataset_name: null # Options: "MATH-500", "MMLU-Pro", "MMLU", "GPQA", "GPQA-Diamond", "GPQA-1K" (ignored if dataset_path is set)
@@ -50,6 +50,7 @@ wandb_cfg:
 
 # Model-specific parameters
 model_params:
+  save_weaver_model: true
   weak_supervision:
     k: 2 # Number of classes
     seed: 0
@@ -60,6 +61,7 @@ model_params:
     log_train_every: 1000
     lr: 0.00001
     use_deps: "drop" # Options: "none", "drop", "model"
+    deps_data_fraction: 0.01
     use_label_on_test: true
     drop_imbalanced_verifiers: "all" # Options: null, "all", "small", "large"
     drop_k: 100 # Number of verifiers to select
