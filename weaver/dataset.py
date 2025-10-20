@@ -6,6 +6,7 @@ from datasets import load_dataset, load_from_disk
 from sklearn.model_selection import train_test_split
 from scipy.spatial.distance import cdist 
 from collections import Counter 
+from omegaconf import ListConfig
 from weaver.constants import (
     DATASET_TO_REWARD_MODELS,
     DATASET_TO_LM_JUDGES,
@@ -37,6 +38,39 @@ def create_df_from_h5(h5_path: str, verifiers_path: str = None):
         for verifier_name in verifiers_list:
             data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
 
+    return pd.DataFrame(data)
+
+
+def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None):
+    # Read verifiers
+    verifiers_list = None
+    if verifiers_path is not None:
+        with open(verifiers_path, 'r') as f:
+            verifier_names = f.read().splitlines()
+        verifiers_list = [v.strip() for v in verifier_names]
+
+    data = {}
+    print("verifiers_path:", verifiers_path)
+    print("verifiers_list:", verifiers_list)
+    for i, h5_path in enumerate(h5_paths):
+        with h5py.File(h5_path, 'r') as h5f:
+            # Get the target group or root            
+            verifiers_list = list(h5f['verifier'].keys()) if verifier_names is None else verifier_names
+            # print(verifier_names)
+            
+            for col in ['instruction', 'samples', 'answer_correct']:
+                col_data = h5f[col][:]
+                if col not in data:
+                    data[col] = col_data.tolist()
+                else:
+                    data[col] = data[col] + list(col_data)
+        
+            for verifier_name in verifiers_list:
+                verifier_data = h5f[f'verifier/{verifier_name}'][:]
+                if verifier_name not in data:
+                    data[verifier_name] = verifier_data.tolist()
+                else:
+                    data[verifier_name] = data[verifier_name] + verifier_data.tolist()
     return pd.DataFrame(data)
 
 
@@ -683,6 +717,8 @@ class VerificationDataset:
         })
         
         self.dataset_path = kwargs.get('dataset_path', None)
+        if isinstance(self.dataset_path, ListConfig):
+            self.dataset_path = list(self.dataset_path)
         
         if self.dataset_path:
             if dataset_name:
@@ -797,17 +833,20 @@ class VerificationDataset:
             print(f"Loading custom dataset from: {self.dataset_path}")
             # Users can pass local or remote dataset
             try:
-                if os.path.exists(self.dataset_path):
-                    # If the dataset path is a parquet file, load using HF dataset from parquet
-                    if self.dataset_path.endswith(".parquet"):
-                        df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
-                    elif self.dataset_path.endswith(".h5"):
-                        assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
-                        df = create_df_from_h5(self.dataset_path, self.verifier_cfg.verifier_subset)
-                    else:
-                        df = pd.DataFrame(load_from_disk(self.dataset_path))
+                if isinstance(self.dataset_path, list):
+                    df = create_df_from_h5s(self.dataset_path, self.verifier_cfg.verifier_subset)
                 else:
-                    df = pd.DataFrame(load_dataset(self.dataset_path)["data"])
+                    if os.path.exists(self.dataset_path):
+                        # If the dataset path is a parquet file, load using HF dataset from parquet
+                        if self.dataset_path.endswith(".parquet"):
+                            df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
+                        elif self.dataset_path.endswith(".h5"):
+                            assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
+                            df = create_df_from_h5(self.dataset_path, self.verifier_cfg.verifier_subset)
+                        else:
+                            df = pd.DataFrame(load_from_disk(self.dataset_path))
+                    else:
+                        df = pd.DataFrame(load_dataset(self.dataset_path)["data"])
 
                 # Dynamically discover the verifiers used in the custom dataset
                 all_reward_models = [col for col in df.columns if col.endswith('_scores')]
@@ -844,6 +883,7 @@ class VerificationDataset:
                 df = df.loc[:, ~df.columns.duplicated()]
                 
         # Which verifiers to use:
+        print("df columns:", df.columns)
         if self.verifier_cfg.get("verifier_type", "all") == "all":
             verifier_names = all_reward_models + all_judges
         elif self.verifier_cfg.verifier_type == "reward_models":
@@ -1059,6 +1099,7 @@ class VerificationDataset:
         # we want to load the task data
         df, correct_key, all_verifiers = self.load_task_data()
         y_data = np.stack(df[correct_key].values).astype(int)
+        print("verifier_names:", verifier_names)
 
         print(f"Number of problems: {len(y_data)} and samples: {len(y_data[0])}", flush=True)
 
