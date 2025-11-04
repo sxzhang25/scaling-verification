@@ -18,6 +18,7 @@ from rm_models import (
     DecisionTreeRewardModel27B, Qwen72BPRMModel
 )
 from lm_judges import get_judge, JUDGE_REGISTRY
+from weaver.dataset import create_df_from_h5s, create_df_from_h5
 
 @dataclass
 class ProcessingMetadata:
@@ -43,6 +44,63 @@ def setup_logging() -> logging.Logger:
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     return logging.getLogger("unified_judging")
+
+def preprocess_h5_dataset(
+    path: str,
+    max_rows: Optional[int] = None,
+    max_samples: Optional[int] = None,
+    start_row: int = 0,
+    end_row: Optional[int] = None,
+    logger: logging.Logger = None
+) -> Dataset:
+    """Load and preprocess dataset from local path or HuggingFace hub"""
+    try:
+        # Load dataset
+        logger.info(f"Loading dataset from {path}")
+        dataset = create_df_from_h5(path)
+                    
+        # Validate required columns
+        required_columns = {'instruction', 'samples'}
+        missing = required_columns - set(dataset.keys())
+        if missing:
+            raise ValueError(f"Dataset missing required columns: {missing}")
+            
+        # Apply row range and limit if specified
+        if end_row is not None:
+            end_idx = min(end_row, len(dataset))
+        else:
+            end_idx = len(dataset)
+            
+        if start_row > 0 or end_row is not None:
+            dataset = dataset.select(range(start_row, end_idx))
+            logger.info(f"Processing rows {start_row} to {end_idx-1}")
+            
+        if max_rows is not None:
+            dataset = dataset.select(range(min(max_rows, len(dataset))))
+            logger.info(f"Limited dataset to {len(dataset)} rows")
+            
+        # Apply sample limit if specified
+        if max_samples is not None:
+            dataset = dataset.map(
+                lambda x: {'samples': x['samples'][:max_samples]},
+                desc="Limiting samples per instruction"
+            )
+            logger.info(f"Limited samples per instruction to {max_samples}")
+            
+        logger.info(
+            f"Dataset loaded successfully:\n"
+            f"- Number of instructions: {len(dataset)}\n"
+            f"- Samples per instruction: {len(dataset['samples'])}\n"
+            # f"- Available columns: {list(dataset.keys())}"
+        )
+
+        
+        
+        return dataset
+        
+    except Exception as e:
+        logger.error(f"Error preprocessing dataset: {e}")
+        raise
 
 def preprocess_dataset(
     path: str,
@@ -266,6 +324,7 @@ def process_with_reward_model(
     gpu_idx: int,
     batch_size: int,
     max_input_length: int,
+    is_h5: bool,
     logger: logging.Logger
 ) -> Dict[int, List[float]]:
     """Process dataset with a single reward model"""
@@ -281,9 +340,17 @@ def process_with_reward_model(
             scores_by_row = {}
             
             # Process all samples for each row
-            for idx, row in enumerate(dataset):
-                instruction = row['instruction']
-                samples = row['samples']
+            if is_h5:
+                enumerator = zip(dataset['instruction'], dataset['samples'])
+            else:
+                enumerator = dataset
+            for idx, row in enumerate(enumerator):
+                if is_h5:
+                    instruction = row[0]
+                    samples = row[1]
+                else:
+                    instruction = row['instruction']
+                    samples = row['samples']
                 
                 try:
                     # Get scores for all samples
@@ -327,9 +394,17 @@ def process_with_reward_model(
             scores_by_row = {}
             
             # Process all samples for each row
-            for idx, row in enumerate(dataset):
-                instruction = row['instruction']
-                samples = row['samples']
+            if is_h5:
+                enumerator = zip(dataset['instruction'], dataset['samples'])
+            else:
+                enumerator = dataset
+            for idx, row in enumerate(enumerator):
+                if is_h5:
+                    instruction = row[0]
+                    samples = row[1]
+                else:
+                    instruction = row['instruction']
+                    samples = row['samples']
                 
                 try:
                     # Get scores for all samples
@@ -359,9 +434,17 @@ def process_with_reward_model(
             scores_by_row = {}
             
             # Process all samples for each row
-            for idx, row in enumerate(dataset):
-                instruction = row['instruction']
-                samples = row['samples']
+            if is_h5:
+                enumerator = zip(dataset['instruction'], dataset['samples'])
+            else:
+                enumerator = dataset
+            for idx, row in enumerate(enumerator):
+                if is_h5:
+                    instruction = row[0]
+                    samples = row[1]
+                else:
+                    instruction = row['instruction']
+                    samples = row['samples']
                 
                 try:
                     # Get scores for all samples
@@ -430,13 +513,22 @@ def process_with_reward_model(
         logger.info(f"Processing with {model_name} on GPU {gpu_idx}")
         
         # For all other models, gather instruction-response pairs
+        
         all_instructions = []
         all_responses = []
         sample_map = []
         
-        for idx, row in enumerate(dataset):
-            instruction = row['instruction']
-            samples = row['samples']
+        if is_h5:
+            enumerator = zip(dataset['instruction'], dataset['samples'])
+        else:
+            enumerator = dataset
+        for idx, row in enumerate(enumerator):
+            if is_h5:
+                instruction = row[0]
+                samples = row[1]
+            else:
+                instruction = row['instruction']
+                samples = row['samples']
             
             for sample in samples:
                 all_instructions.append(instruction)
@@ -459,7 +551,12 @@ def process_with_reward_model(
     except Exception as e:
         logger.error(f"Error processing with {model_name}: {e}")
         # Return None scores instead of raising
-        return {idx: [None] * len(row['samples']) for idx, row in enumerate(dataset)}
+        if is_h5:
+            enumerator = zip(dataset['instruction'], dataset['samples'])
+            return {idx: [None] * len(row[1]) for idx, row in enumerate(enumerator)}
+        else:
+            enumerator = dataset
+            return {idx: [None] * len(row['samples']) for idx, row in enumerate(enumerator)}
         
     finally:
         if model is not None:
@@ -471,6 +568,7 @@ def process_with_reward_models_parallel(
     gpu_allocations: Dict[str, int],
     batch_size: int,
     max_input_length: int,
+    is_h5: bool,
     logger: logging.Logger
 ) -> Dataset:
     """Process dataset with multiple reward models in batches based on available GPUs"""
@@ -512,6 +610,7 @@ def process_with_reward_models_parallel(
                         gpu_allocations[model_name],
                         batch_size,
                         max_input_length,
+                        is_h5,
                         logger
                     ): model_name
                     for model_name in batch_models
@@ -632,7 +731,8 @@ def process_with_lm_judge(
     num_verdicts: int,
     batch_size: int,
     logger: logging.Logger,
-    critique_mode: bool = False
+    critique_mode: bool = False,
+    is_h5: bool = False
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[str]]]:
     """Process dataset with a single LM judge"""
     judge = None
@@ -652,9 +752,21 @@ def process_with_lm_judge(
         
         scores_by_row = {}
         raw_verdicts_by_row = {}
-        for idx, row in enumerate(dataset):
-            instruction = row['instruction']
-            samples = row['samples']
+        
+        # Set up enumerator based on dataset type
+        if is_h5:
+            # For pandas DataFrame, zip only the columns we need to avoid iterating over all columns
+            enumerator = zip(dataset['instruction'], dataset['samples'])
+        else:
+            enumerator = dataset
+            
+        for idx, row in enumerate(enumerator):
+            if is_h5:
+                instruction = row[0]
+                samples = row[1]
+            else:
+                instruction = row['instruction']
+                samples = row['samples']
             
             logger.info(f"Processing row {idx} with {len(samples)} samples")
             
@@ -687,7 +799,8 @@ def process_with_judges_sequential(
     num_verdicts: int,
     batch_size: int,
     logger: logging.Logger,
-    critique_mode: bool = False
+    critique_mode: bool = False,
+    is_h5: bool = False
 ) -> Dataset:
     """Process dataset with multiple LM judges sequentially"""
     try:
@@ -712,7 +825,8 @@ def process_with_judges_sequential(
                     num_verdicts=num_verdicts,
                     batch_size=batch_size,
                     logger=logger,
-                    critique_mode=critique_mode
+                    critique_mode=critique_mode,
+                    is_h5=is_h5
                 )
                 
                 # Add scores and raw verdicts to dataset
@@ -857,15 +971,27 @@ def main():
         logger.info("\nProcessing reward models...")
         gpu_allocations = allocate_models_to_gpus(model_names, available_gpus)
         logger.info(f"GPU allocations for reward models: {gpu_allocations}")
+
+        is_h5 = args.dataset_path.endswith(".h5")
         
-        dataset = preprocess_dataset(
-            path=args.dataset_path,
-            max_rows=args.max_rows,
-            max_samples=args.max_samples,
-            start_row=args.start_row,
-            end_row=args.end_row,
-            logger=logger
-        )
+        if is_h5:
+            dataset = preprocess_h5_dataset(
+                path=args.dataset_path,
+                max_rows=args.max_rows,
+                max_samples=args.max_samples,
+                start_row=args.start_row,
+                end_row=args.end_row,
+                logger=logger
+            )
+        else:
+            dataset = preprocess_dataset(
+                path=args.dataset_path,
+                max_rows=args.max_rows,
+                max_samples=args.max_samples,
+                start_row=args.start_row,
+                end_row=args.end_row,
+                logger=logger
+            )
         
         if len(model_names) > 0:
             if args.sequential_rm_processing:
@@ -879,13 +1005,14 @@ def main():
                     logger=logger
                 )
             else:
-                logger.info("Using parallel reward model processing")
+                logger.info(f"Using parallel reward model processing, is_h5: {is_h5}")
                 dataset = process_with_reward_models_parallel(
                     dataset=dataset,
                     model_names=model_names,
                     gpu_allocations=gpu_allocations,
                     batch_size=args.batch_size,
                     max_input_length=args.max_input_length,
+                    is_h5=is_h5,
                     logger=logger
                 )
         
@@ -899,7 +1026,8 @@ def main():
                 num_verdicts=args.verdicts_per_sample,
                 batch_size=args.batch_size,
                 logger=logger,
-                critique_mode=args.critique_mode
+                critique_mode=args.critique_mode,
+                is_h5=is_h5
             )
         
         # Create metadata
