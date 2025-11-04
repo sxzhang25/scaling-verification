@@ -428,9 +428,21 @@ def train(args):
         top1_fn_test = df_test["top1_fn"].sum()
         top1_tn_test = df_test["top1_tn"].sum()
         top1_acc_test = (top1_tp_test + top1_tn_test) / (top1_tp_test + top1_tn_test + top1_fp_test + top1_fn_test)
+
+        sample_tp_train = df_train["sample_tp"].sum()
+        sample_tn_train = df_train["sample_tn"].sum()
+        sample_fp_train = df_train["sample_fp"].sum()
+        sample_fn_train = df_train["sample_fn"].sum()
+
+        sample_tp_test = df_test["sample_tp"].sum()
+        sample_tn_test = df_test["sample_tn"].sum()
+        sample_fp_test = df_test["sample_fp"].sum()
+        sample_fn_test = df_test["sample_fn"].sum()
     except:
         top1_tp_train, top1_fp_train, top1_fn_train, top1_tn_train, top1_acc_train = np.nan, np.nan, np.nan, np.nan, np.nan
         top1_tp_test, top1_fp_test, top1_fn_test, top1_tn_test, top1_acc_test = np.nan, np.nan, np.nan, np.nan, np.nan
+        sample_tp_train, sample_tn_train, sample_fp_train, sample_fn_train = np.nan, np.nan, np.nan, np.nan
+        sample_tp_test, sample_tn_test, sample_fp_test, sample_fn_test = np.nan, np.nan, np.nan, np.nan
 
     # 1. SUMMARY TABLE
     console.print(f"\n[bold green]SUMMARY RESULTS[/bold green]")
@@ -440,10 +452,14 @@ def train(args):
         'Select_Acc': [f"{df_train['top1_positive'].mean():.3f}", f"{df_test['top1_positive'].mean():.3f}"],
         'Sample_Acc': [f"{df_train['sample_accuracy'].mean():.3f}", f"{df_test['sample_accuracy'].mean():.3f}"],
         'Top1_Acc': [f"{top1_acc_train:.3f}", f"{top1_acc_test:.3f}"],
-        'TP': [top1_tp_train, top1_tp_test],
-        'TN': [top1_tn_train, top1_tn_test], 
-        'FP': [top1_fp_train, top1_fp_test],
-        'FN': [top1_fn_train, top1_fn_test]
+        'Select TP': [top1_tp_train, top1_tp_test],
+        'Select TN': [top1_tn_train, top1_tn_test], 
+        'Select FP': [top1_fp_train, top1_fp_test],
+        'Select FN': [top1_fn_train, top1_fn_test],
+        'Sample TP': [sample_tp_train, sample_tp_test],
+        'Sample TN': [sample_tn_train, sample_tn_test], 
+        'Sample FP': [sample_fp_train, sample_fp_test],
+        'Sample FN': [sample_fn_train, sample_fn_test],
     }
     summary_df = pd.DataFrame(summary_data)
     print(summary_df.to_markdown(index=False, tablefmt="grid"))
