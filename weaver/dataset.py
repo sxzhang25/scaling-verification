@@ -32,11 +32,17 @@ def create_df_from_h5(h5_path: str, verifiers_path: str = None):
         verifiers_list = [v.strip() for v in verifier_names]
     with h5py.File(h5_path, 'r') as h5f:
         data = {key: h5f[key][:].tolist() for key in h5f.keys() if key != 'verifier'}
+        # for key in data.keys():
+        #     print(key, len(data[key]))
 
         if verifiers_list is None:
             verifiers_list = list(h5f['verifier'].keys())
         for verifier_name in verifiers_list:
-            data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
+            if verifier_name.startswith('~'):
+                data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
+            else:
+                data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
+            # print(len(data[verifier_name]))
 
     return pd.DataFrame(data)
 
@@ -66,11 +72,14 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None):
                     data[col] = data[col] + list(col_data)
         
             for verifier_name in verifiers_list:
-                verifier_data = h5f[f'verifier/{verifier_name}'][:]
-                if verifier_name not in data:
-                    data[verifier_name] = verifier_data.tolist()
+                if verifier_name.startswith('~'):
+                    verifier_data = (1 - h5f[f'verifier/{verifier_name[1:]}'][:]).tolist()
                 else:
-                    data[verifier_name] = data[verifier_name] + verifier_data.tolist()
+                    verifier_data = h5f[f'verifier/{verifier_name}'][:].tolist()
+                if verifier_name not in data:
+                    data[verifier_name] = verifier_data
+                else:
+                    data[verifier_name] = data[verifier_name] + verifier_data
     return pd.DataFrame(data)
 
 
