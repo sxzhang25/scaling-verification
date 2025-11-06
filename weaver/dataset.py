@@ -61,7 +61,7 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None):
     for i, h5_path in enumerate(h5_paths):
         with h5py.File(h5_path, 'r') as h5f:
             # Get the target group or root            
-            verifiers_list = list(h5f['verifier'].keys()) if verifier_names is None else verifier_names
+            verifiers_list = list(h5f['verifier'].keys()) if verifiers_list is None else verifiers_list
             # print(verifier_names)
             
             for col in ['instruction', 'samples', 'answer_correct']:
