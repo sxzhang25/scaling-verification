@@ -78,6 +78,73 @@ Please put your final answer (i.e., the index) in \\boxed{{}}."""
         {"role": "user", "content": user_message}
     ]
 
+def create_scenegen_evaluation_prompt(instruction: str, sample: str) -> List[Dict[str, str]]:
+    """Creates a prompt for evaluating generated scenes."""
+    
+    system_message = """You are a rigorous evaluator for determining whether a scene is valid and high quality with respect to a given prompt.
+
+    The scene will be represented as a JSON with a list of objects and a floor layout. The floor layout will be represented as a list of vertices and faces.
+    Each object will be represented by a unique name, category, position, size, forward direction, right direction, and up direction.
+    
+    Evaluate the scene against the relevant criteria such as:
+    - Whether the right objects are present in the scene
+    - Physically plausible placement of objects, such as grounding and intersections
+    - Making sure objects are in bounds of the floor layout
+    - Accessible and navigable arrangement of the space
+    - Proper commonsense relationships between objects and the space
+
+    For instance, if objects intersect or float in the air when they should be on the ground, this is an error. Or if objects are not accessible or
+    prevent parts of the room from being accessed, this is an error. If objects do not face the correct direction, this is an error. Check for other 
+    errors of similar nature.
+    
+    Then respond with EXACTLY "True" if you have high confidence the scene is valid and high quality, or "False" if you have meaningful doubts.
+    
+    Your response should be structured as:
+    A single line containing only "True" or "False" 
+
+    You must include your final verdict of True or False on a new line at the end of your response."""
+    
+    user_message = f"""Prompt: {instruction}
+
+Scene to evaluate:
+{sample}
+
+Analyze the scene, then on a new line state True or False:"""
+
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message}
+    ]
+
+def create_scenegen_critique_prompt(instruction: str, sample: str) -> List[Dict[str, str]]:
+    """Creates a prompt for paragraph-by-paragraph critique of scenes"""
+    
+    # Split sample into paragraphs and format with tags
+    paragraphs = sample.split('\n\n')
+    formatted_solution = '\n'.join(
+        f"<paragraph_{i}>\n{para}\n</paragraph_{i}>"
+        for i, para in enumerate(paragraphs)
+    )
+    
+    system_message = """You are a rigorous evaluator for determining whether a scene is valid and high quality with respect to a given prompt."""
+    
+    user_message = f"""The following is a prompt and a scene (split into paragraphs, enclosed with tags and indexed from 0):
+
+[Prompt]
+{instruction}
+
+[Scene]
+{sample}
+
+Your task is to review and critique the different components of the scene. Once you identify an error, return the objects involved in the error and the nature of the error. Otherwise, return "No errors found".
+
+Please put your final answer (i.e., the objects involved in the error and the nature of the error) in \\boxed{{}}."""
+
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message}
+    ]
+
 @dataclass
 class LMJudgeConfig:
     """Configuration for LM Judge"""
@@ -185,7 +252,8 @@ class LMJudge:
         self,
         batch_instructions: List[str],
         batch_samples: List[str],
-        start_idx: int
+        start_idx: int,
+        task_type: str
     ) -> Tuple[Dict[int, List[float]], Dict[int, str]]:
         """Process a batch using API calls with parallel execution"""
         scores_by_row = {}
@@ -201,7 +269,10 @@ class LMJudge:
             response = None
             
             for _ in range(self.config.num_verdicts):
-                messages = create_evaluation_prompt(instruction, sample)
+                if task_type == "scenegen":
+                    messages = create_scenegen_evaluation_prompt(instruction, sample)
+                else:
+                    messages = create_evaluation_prompt(instruction, sample)
                 try:
                     response = self.generator(
                         model=self.config.model_name,
@@ -243,7 +314,8 @@ class LMJudge:
         self,
         batch_instructions: List[str],
         batch_samples: List[str],
-        start_idx: int
+        start_idx: int,
+        task_type: str
     ) -> Tuple[Dict[int, List[float]], Dict[int, str]]:
         """Process a batch using vLLM"""
         scores_by_row = {}
@@ -252,7 +324,10 @@ class LMJudge:
         # Create evaluation prompts for batch
         batch_prompts = []
         for instruction, sample in zip(batch_instructions, batch_samples):
-            messages = create_evaluation_prompt(instruction, sample)
+            if task_type == "scenegen":
+                messages = create_scenegen_evaluation_prompt(instruction, sample)
+            else:
+                messages = create_evaluation_prompt(instruction, sample)
             prompt = self.tokenizer.apply_chat_template(messages, tokenize=False)
             batch_prompts.append(prompt)
         
@@ -288,7 +363,8 @@ class LMJudge:
         self,
         instructions: List[str],
         samples: List[str],
-        batch_size: Optional[int] = None
+        task_type: str,
+        batch_size: Optional[int] = None,
     ) -> Tuple[Dict[int, List[float]], Dict[int, str]]:
         """Get scores and raw verdicts for instruction-sample pairs"""
         if len(instructions) != len(samples):
@@ -309,11 +385,11 @@ class LMJudge:
             # Use appropriate processing method
             if self.config.provider in ['openai', 'anthropic', 'together', 'sambanova', 'fireworks']:
                 batch_scores, batch_raw_verdicts = self._process_api_batch(
-                    batch_instructions, batch_samples, i
+                    batch_instructions, batch_samples, i, task_type
                 )
             else:
                 batch_scores, batch_raw_verdicts = self._process_vllm_batch(
-                    batch_instructions, batch_samples, i
+                    batch_instructions, batch_samples, i, task_type
                 )
             
             scores_by_row.update(batch_scores)
@@ -392,7 +468,8 @@ class LMJudge:
         self,
         instructions: List[str],
         samples: List[str],
-        batch_size: Optional[int] = None
+        task_type: str,
+        batch_size: Optional[int] = None,
     ) -> Tuple[Dict[int, List[float]], Dict[int, str]]:
         """Get critique scores and raw verdicts for instruction-sample pairs"""
         if len(instructions) != len(samples):
@@ -415,7 +492,10 @@ class LMJudge:
             # Create all prompts for the batch at once
             batch_prompts = []
             for instruction, sample in zip(batch_instructions, batch_samples):
-                messages = create_critique_prompt(instruction, sample)
+                if task_type == "scenegen":
+                    messages = create_scenegen_critique_prompt(instruction, sample)
+                else:
+                    messages = create_critique_prompt(instruction, sample)
                 logging.debug(f"Created critique prompt: {messages}")  # Debug prompt creation
                 if self.config.provider not in ['openai', 'anthropic']:
                     prompt = self.tokenizer.apply_chat_template(messages, tokenize=False)
@@ -427,7 +507,10 @@ class LMJudge:
                     # Process API models one at a time
                     for idx, (instruction, sample) in enumerate(zip(batch_instructions, batch_samples)):
                         overall_idx = i + idx
-                        messages = create_critique_prompt(instruction, sample)
+                        if task_type == "scenegen":
+                            messages = create_scenegen_critique_prompt(instruction, sample)
+                        else:
+                            messages = create_critique_prompt(instruction, sample)
                         response = self.generator(
                             model=self.config.model_name,
                             messages=messages,

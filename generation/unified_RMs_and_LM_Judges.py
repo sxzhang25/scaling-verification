@@ -5,7 +5,9 @@ from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset, Dataset, DatasetDict, load_from_disk
 import torch
 import time
+import h5py
 import json
+import numpy as np
 from dataclasses import dataclass
 import concurrent.futures
 import multiprocessing
@@ -57,7 +59,7 @@ def preprocess_h5_dataset(
     try:
         # Load dataset
         logger.info(f"Loading dataset from {path}")
-        dataset = create_df_from_h5(path)
+        dataset = create_df_from_h5(path, data_only=True)
                     
         # Validate required columns
         required_columns = {'instruction', 'samples'}
@@ -72,25 +74,25 @@ def preprocess_h5_dataset(
             end_idx = len(dataset)
             
         if start_row > 0 or end_row is not None:
-            dataset = dataset.select(range(start_row, end_idx))
+            for key in ['samples', 'instruction', 'answer_correct']:
+                dataset[key] = dataset[key][start_row:end_idx]
+            # dataset = dataset.select(range(start_row, end_idx))
             logger.info(f"Processing rows {start_row} to {end_idx-1}")
             
         if max_rows is not None:
-            dataset = dataset.select(range(min(max_rows, len(dataset))))
+            dataset = dataset.head(max_rows)
             logger.info(f"Limited dataset to {len(dataset)} rows")
             
         # Apply sample limit if specified
         if max_samples is not None:
-            dataset = dataset.map(
-                lambda x: {'samples': x['samples'][:max_samples]},
-                desc="Limiting samples per instruction"
-            )
-            logger.info(f"Limited samples per instruction to {max_samples}")
+            dataset['samples'] = dataset['samples'].apply(lambda x: x[:max_samples])
+            dataset['answer_correct'] = dataset['answer_correct'][start_row:end_idx]
+            logger.info(f"Limited samples per instruction to {len(dataset['samples'][0])}")
             
         logger.info(
             f"Dataset loaded successfully:\n"
-            f"- Number of instructions: {len(dataset)}\n"
-            f"- Samples per instruction: {len(dataset['samples'])}\n"
+            f"- Number of instructions: {len(dataset['instruction'])}\n"
+            f"- Samples per instruction: {len(dataset['samples'][0])}\n"
             # f"- Available columns: {list(dataset.keys())}"
         )
 
@@ -181,6 +183,7 @@ def preprocess_dataset(
 def post_process_dataset(
     dataset: Dataset,
     metadata: ProcessingMetadata,
+    is_h5: bool,
     logger: logging.Logger
 ) -> Dataset:
     """Post-process dataset to ensure consistent format and add metadata"""
@@ -208,8 +211,32 @@ def post_process_dataset(
                             f"{num_samples} samples but {num_scores} scores"
                         )
             return example
-            
-        dataset = dataset.map(validate_row)
+
+        def validate_row_h5(idx, num_samples):
+            for model_name in metadata.reward_models_used:
+                if model_name in ["QwenPRM", "EurusPRMStage1", "EurusPRMStage2"]:
+                    # Check all score types
+                    for score_type in ['min_scores', 'max_scores', 'avg_scores']:
+                        num_scores = len(dataset[f'{model_name}_{score_type}'][idx])
+                        if num_samples != num_scores:
+                            logger.warning(
+                                f"Mismatch for {model_name} {score_type}: "
+                                f"{num_samples} samples but {num_scores} scores"
+                            )
+                else:
+                    num_scores = len(dataset[f'{model_name}_scores'][idx])
+                    if num_samples != num_scores:
+                        logger.warning(
+                            f"Mismatch for {model_name}: "
+                            f"{num_samples} samples but {num_scores} scores"
+                        )
+
+        if is_h5:
+            for idx, sample in enumerate(dataset['samples']):
+                num_samples = len(sample)
+                validate_row_h5(idx, num_samples)
+        else:
+            dataset = dataset.map(validate_row)
 
         final_dataset = dataset
         
@@ -239,6 +266,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to save the processed dataset (e.g., 'path/to/output.hf')"
     )
     parser.add_argument(
+        "--task_type",
+        type=str,
+        default="scenegen",
+        help="Type of task to process (scenegen or math)"
+    )
+    parser.add_argument(
         "--max_rows",
         type=int,
         help="Maximum number of instructions/rows to process"
@@ -253,7 +286,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reward_models",
         type=str,
-        default="GRM,Skyworks,URM,QRM,GPM,GRMLlama32,OffsetBias,GRMGemma,ArmorRM,QwenPRM,EurusPRMStage1,EurusPRMStage2,InternLM2Reward7B,DecisionTreeReward8B",
+        default="",
+        # default="GRM,Skyworks,URM,QRM,GPM,GRMLlama32,OffsetBias,GRMGemma,ArmorRM,QwenPRM,EurusPRMStage1,EurusPRMStage2,InternLM2Reward7B,DecisionTreeReward8B",
         help="Comma-separated list of reward models to use (e.g., 'GRM,Skyworks')"
     )
     parser.add_argument(
@@ -265,7 +299,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max_input_length",
         type=int,
-        default=2048,
+        default=8192,
         help="Maximum input length for reward model tokenization"
     )
     parser.add_argument(
@@ -658,11 +692,42 @@ def process_with_reward_models_parallel(
                     example[f'{model_name}_scores'] = all_scores[model_name].get(idx, [None] * len(example['samples']))
             return example
             
-        dataset = dataset.map(
-            add_model_scores,
-            with_indices=True,
-            desc="Adding model scores"
-        )
+        if is_h5:
+            # For h5 datasets (dict-like), add columns directly
+            for model_name in model_names:
+                if model_name in ["QwenPRM", "EurusPRMStage1", "EurusPRMStage2"]:
+                    column_name = f'{model_name}_min_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_max_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_avg_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_step_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [[]] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                else:
+                    column_name = f'{model_name}_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+        else:
+            dataset = dataset.map(
+                add_model_scores,
+                with_indices=True,
+                desc="Adding model scores"
+            )
         
         logger.info("Completed reward model processing")
         return dataset
@@ -732,7 +797,8 @@ def process_with_lm_judge(
     batch_size: int,
     logger: logging.Logger,
     critique_mode: bool = False,
-    is_h5: bool = False
+    is_h5: bool = False,
+    task_type: str = "scenegen"
 ) -> Tuple[Dict[str, List[List[float]]], Dict[str, List[str]]]:
     """Process dataset with a single LM judge"""
     judge = None
@@ -755,7 +821,7 @@ def process_with_lm_judge(
         
         # Set up enumerator based on dataset type
         if is_h5:
-            # For pandas DataFrame, zip only the columns we need to avoid iterating over all columns
+            # For h5 dataset, zip only the columns we need to avoid iterating over all columns
             enumerator = zip(dataset['instruction'], dataset['samples'])
         else:
             enumerator = dataset
@@ -772,9 +838,9 @@ def process_with_lm_judge(
             
             # Get scores and raw verdicts for all samples in this row
             if critique_mode:
-                scores_dict, raw_verdicts = judge.get_critique_scores([instruction] * len(samples), samples)
+                scores_dict, raw_verdicts = judge.get_critique_scores([instruction] * len(samples), samples, task_type=task_type)
             else:
-                scores_dict, raw_verdicts = judge.get_scores([instruction] * len(samples), samples)
+                scores_dict, raw_verdicts = judge.get_scores([instruction] * len(samples), samples, task_type=task_type)
                 
             logger.info(f"Row {idx} scores: {scores_dict}")
             
@@ -800,7 +866,8 @@ def process_with_judges_sequential(
     batch_size: int,
     logger: logging.Logger,
     critique_mode: bool = False,
-    is_h5: bool = False
+    is_h5: bool = False,
+    task_type: str = "scenegen"
 ) -> Dataset:
     """Process dataset with multiple LM judges sequentially"""
     try:
@@ -826,7 +893,8 @@ def process_with_judges_sequential(
                     batch_size=batch_size,
                     logger=logger,
                     critique_mode=critique_mode,
-                    is_h5=is_h5
+                    is_h5=is_h5,
+                    task_type=task_type
                 )
                 
                 # Add scores and raw verdicts to dataset
@@ -841,11 +909,21 @@ def process_with_judges_sequential(
                         # example[f'{judge_name}{mode_suffix}_raw_verdicts_text'] = [None] * len(example['samples'])
                     return example
                 
-                dataset = dataset.map(
-                    add_judge_scores,
-                    with_indices=True,
-                    desc=f"Adding {judge_name} scores and raw verdicts"
-                )
+                if is_h5:
+                    # For h5 datasets (dict-like), add columns directly
+                    mode_suffix = "_critique" if critique_mode else ""
+                    column_name = f'{judge_name}{mode_suffix}_verdicts'
+                    
+                    dataset[column_name] = [
+                        scores.get(str(idx), [[None]] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                else:
+                    dataset = dataset.map(
+                        add_judge_scores,
+                        with_indices=True,
+                        desc=f"Adding {judge_name} scores and raw verdicts"
+                    )
                 
             except Exception as e:
                 logger.error(f"Error processing {judge_name}: {e}")
@@ -864,6 +942,7 @@ def process_with_reward_models_sequential(
     gpu_allocations: Dict[str, int],
     batch_size: int,
     max_input_length: int,
+    is_h5: bool,
     logger: logging.Logger
 ) -> Dataset:
     """Process dataset with multiple reward models sequentially"""
@@ -886,6 +965,7 @@ def process_with_reward_models_sequential(
                     gpu_idx=gpu_allocations[model_name],
                     batch_size=batch_size,
                     max_input_length=max_input_length,
+                    is_h5=is_h5,
                     logger=logger
                 )
                 all_scores[model_name] = scores
@@ -923,11 +1003,42 @@ def process_with_reward_models_sequential(
                     example[f'{model_name}_scores'] = all_scores[model_name].get(idx, [None] * len(example['samples']))
             return example
             
-        dataset = dataset.map(
-            add_model_scores,
-            with_indices=True,
-            desc="Adding model scores"
-        )
+        if is_h5:
+            # For h5 datasets (dict-like), add columns directly
+            for model_name in model_names:
+                if model_name in ["QwenPRM", "EurusPRMStage1", "EurusPRMStage2"]:
+                    column_name = f'{model_name}_min_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_max_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_avg_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                    column_name = f'{model_name}_step_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [[]] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+                else:
+                    column_name = f'{model_name}_scores'
+                    dataset[column_name] = [
+                        all_scores[model_name].get(idx, [None] * len(dataset['samples'][idx]))
+                        for idx in range(len(dataset['instruction']))
+                    ]
+        else:
+            dataset = dataset.map(
+                add_model_scores,
+                with_indices=True,
+                desc="Adding model scores"
+            )
         
         logger.info("Completed reward model processing")
         return dataset
@@ -944,6 +1055,7 @@ def main():
     
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    is_h5 = args.dataset_path.endswith(".h5")
     
     try:
         # Parse reward models and judges
@@ -971,8 +1083,6 @@ def main():
         logger.info("\nProcessing reward models...")
         gpu_allocations = allocate_models_to_gpus(model_names, available_gpus)
         logger.info(f"GPU allocations for reward models: {gpu_allocations}")
-
-        is_h5 = args.dataset_path.endswith(".h5")
         
         if is_h5:
             dataset = preprocess_h5_dataset(
@@ -1002,6 +1112,7 @@ def main():
                     gpu_allocations=gpu_allocations,
                     batch_size=args.batch_size,
                     max_input_length=args.max_input_length,
+                    is_h5=is_h5,
                     logger=logger
                 )
             else:
@@ -1035,7 +1146,7 @@ def main():
             timestamp=time.strftime("%Y%m%d_%H%M%S"),
             dataset_path=args.dataset_path,
             num_instructions=len(dataset),
-            num_samples_per_instruction=len(dataset[0]['samples']),
+            num_samples_per_instruction=len(dataset['samples'][0]) if is_h5 else len(dataset[0]['samples']),
             max_input_length=args.max_input_length,
             reward_models_used=model_names,
             lm_judges_used=judge_names,
@@ -1044,8 +1155,39 @@ def main():
         )
         
         # Save final dataset
-        final_dataset = post_process_dataset(dataset, metadata, logger)
-        DatasetDict({"data": final_dataset}).save_to_disk(args.output_path)
+        final_dataset = post_process_dataset(dataset, metadata, is_h5, logger)
+        print("final_dataset:", final_dataset.keys())
+        if is_h5:
+            with h5py.File(args.output_path, 'a') as h5f:
+                # Save `instruction` as a simple string column
+                instruction_arr = np.array(final_dataset["instruction"], dtype='S')
+                if 'instruction' in h5f:
+                    del h5f['instruction']
+                h5f.create_dataset('instruction', data=instruction_arr, dtype=h5py.special_dtype(vlen=str))
+
+                # Save `samples` as a ragged array of strings (variable-length)
+                dt_samples = h5py.special_dtype(vlen=str)
+                samples_arr = np.array([np.array([str(s) for s in sample], dtype=object) 
+                                        for sample in final_dataset["samples"]], dtype=object)
+                if 'samples' in h5f:
+                    del h5f['samples']
+                h5f.create_dataset('samples', data=samples_arr, dtype=dt_samples)
+                
+                # Save `answer_correct` as an n_tasks x n_samples boolean array
+                answer_correct_arr = np.array(final_dataset["answer_correct"], dtype=bool)
+                if 'answer_correct' in h5f:
+                    del h5f['answer_correct']
+                h5f.create_dataset('answer_correct', data=answer_correct_arr, dtype='bool')
+
+                for key in final_dataset.keys():
+                    if key not in ['instruction', 'samples', 'answer_correct']:
+                        # If verdicts_arr is a pandas Series, convert it to a numpy array suitable for h5py
+                        verdicts_arr = np.array(final_dataset[key].tolist())
+                        if key in h5f:
+                            del h5f[key]
+                        h5f.create_dataset(key, data=verdicts_arr, dtype='float')
+        else:
+            DatasetDict({"data": final_dataset}).save_to_disk(args.output_path)
         logger.info(f"Dataset saved locally to: {args.output_path}")
         
         # Push to hub if specified
@@ -1059,7 +1201,10 @@ def main():
         
         # Print sample results
         logger.info("\nExample results:")
-        example = final_dataset[0]
+        if is_h5:
+            example = {key: final_dataset[key][0] for key in final_dataset.keys()}
+        else:
+            example = final_dataset[0]
         logger.info(f"Instruction: {example['instruction']}")
         logger.info(f"Number of samples: {len(example['samples'])}")
         
