@@ -24,7 +24,7 @@ from collections import defaultdict
 import warnings
 import itertools
 
-def create_df_from_h5(h5_path: str, verifiers_path: str = None):
+def create_df_from_h5(h5_path: str, verifiers_path: str = None, data_only: bool = False):
     verifiers_list = None
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
@@ -36,7 +36,7 @@ def create_df_from_h5(h5_path: str, verifiers_path: str = None):
         #     print(key, len(data[key]))
 
         if verifiers_list is None:
-            verifiers_list = list(h5f['verifier'].keys())
+            verifiers_list = [] if data_only else list(h5f['verifier'].keys())
         for verifier_name in verifiers_list:
             if verifier_name.startswith('~'):
                 data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
@@ -47,7 +47,7 @@ def create_df_from_h5(h5_path: str, verifiers_path: str = None):
     return pd.DataFrame(data)
 
 
-def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None):
+def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None, data_only: bool = False):
     # Read verifiers
     verifiers_list = None
     if verifiers_path is not None:
@@ -60,8 +60,9 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None):
     print("verifiers_list:", verifiers_list)
     for i, h5_path in enumerate(h5_paths):
         with h5py.File(h5_path, 'r') as h5f:
-            # Get the target group or root            
-            verifiers_list = list(h5f['verifier'].keys()) if verifier_names is None else verifier_names
+            # Get the target group or root
+            if verifiers_list is None:
+                verifiers_list = [] if data_only else list(h5f['verifier'].keys())
             # print(verifier_names)
             
             for col in ['instruction', 'samples', 'answer_correct']:
