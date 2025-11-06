@@ -19,33 +19,84 @@ from datasets import load_dataset, load_from_disk, Dataset, DatasetDict
 FIGURES_DIR = Path("figures")
 FIGURES_DIR.mkdir(exist_ok=True)
 
-# TODO: implement this
 def save_weaver_model(model, args):
-    """Save Weaver model to dataset."""
-    if model.model_type != "weak_supervision":
-        return
-
-    # Create pickle with all model params.
-    model_params = {}
-
-    # def predict_proba(self, X):
-    #     X = X[:, self.verifier_idxs] # use only the verifiers that were used to fit the model
-    #     if self.use_continuous:
-    #         probs = np.zeros((X.shape[0], 2))
-    #         for i in range(X.shape[0]):
-    #             prob = np.expand_dims(self.Sigma_hat[self.m, :self.m], axis=0) \
-    #                                 .dot(np.linalg.inv(self.Sigma_hat[:self.m, :self.m])) \
-    #                                 .dot(np.expand_dims(X[i, :self.m], axis=1))
-    #             probs[i, 0] = 1 - prob.item()
-    #             probs[i, 1] = prob.item()
-    #         return probs
-    #     else:
-    #         return super().predict_proba(X)
+    """Save Weaver model with all necessary information for reconstruction."""
+    # Get the underlying WeakSupervised model
+    if model.model_class == "per_dataset":
+        ws_model = model.model
+    elif model.model_class == "per_dataset_cluster":
+        ws_model = model.model
+    elif model.model_class == "per_problem":
+        # For per_problem models, save the first trained model as reference
+        # In practice, you may want to save all models
+        trained_idxs = [idx for idx, is_trained in model.is_trained.items() if is_trained]
+        if len(trained_idxs) == 0:
+            raise ValueError("No trained models found to save")
+        ws_model = model.models[trained_idxs[0]]
+    else:
+        raise ValueError(f"Model class {model.model_class} not supported for saving")
     
-
-    output_path =f'{os.path.splitext(args.data_cfg.dataset_path)[0]}_model.pkl'
-    with open(output_path, "wb") as f:
-        pickle.dump(model_params, f)
+    if args.model_cfg.model_type != "weak_supervision":
+        raise ValueError(f"Model type {args.model_cfg.model_type} is not weak_supervision")
+    
+    # Extract all necessary information
+    saved_model = {
+        "model_type": args.model_cfg.model_type,
+        "model_class": model.model_class,
+        "verifier_names": ws_model.verifier_names,
+        "verifier_idxs": ws_model.verifier_idxs.tolist() if hasattr(ws_model.verifier_idxs, 'tolist') else list(ws_model.verifier_idxs),
+        "mu": ws_model.mu.detach().cpu().numpy() if hasattr(ws_model.mu, 'detach') else ws_model.mu,
+        "k": ws_model.k,
+        "use_continuous": ws_model.use_continuous,
+        "metric": ws_model.metric,
+        "p": ws_model.p.tolist() if hasattr(ws_model.p, 'tolist') else list(ws_model.p),
+        "P": ws_model.P.detach().cpu().numpy() if hasattr(ws_model.P, 'detach') else ws_model.P,
+    }
+    
+    # Save continuous model parameters if applicable
+    if ws_model.use_continuous:
+        saved_model["Sigma_hat"] = ws_model.Sigma_hat
+        saved_model["var_y"] = ws_model.var_y
+        saved_model["n"] = ws_model.n
+        saved_model["m"] = ws_model.m
+    
+    # Save model configuration
+    saved_model["config"] = {
+        "use_deps": getattr(ws_model, 'use_deps', None),
+        "drop_imbalanced_verifiers": getattr(ws_model, 'drop_imbalanced_verifiers', None),
+        "drop_k": getattr(ws_model, 'drop_k', None),
+        "fit_when_calculating_metrics": getattr(ws_model, 'fit_when_calculating_metrics', False),
+    }
+    
+    # Also save human-readable verifier parameters for reference
+    verifier_params = {}
+    for i, v_idx in enumerate(ws_model.verifier_idxs):
+        verifier_name = ws_model.verifier_names[v_idx]
+        if verifier_name.startswith('VerifierType'):
+            verifier_name = ws_model.verifier_names[v_idx].split('.')[1]
+        if verifier_name.startswith('~VerifierType'):
+            verifier_name = "~" + ws_model.verifier_names[v_idx].split('.')[1]
+        
+        if not ws_model.use_continuous:
+            p_s0_y0 = saved_model["mu"][2 * i, 0]
+            p_s0_y1 = saved_model["mu"][2 * i, 1]
+            p_s1_y0 = saved_model["mu"][2 * i + 1, 0]
+            p_s1_y1 = saved_model["mu"][2 * i + 1, 1]
+            verifier_params[verifier_name] = {
+                "P(S=0|Y=0)": float(p_s0_y0),
+                "P(S=0|Y=1)": float(p_s0_y1),
+                "P(S=1|Y=0)": float(p_s1_y0),
+                "P(S=1|Y=1)": float(p_s1_y1)
+            }
+    
+    saved_model["verifier_params"] = verifier_params
+    
+    with open(args.data_cfg.model_path, "wb") as f:
+        pickle.dump(saved_model, f)
+    
+    print(f"Saved Weaver model to {args.data_cfg.model_path}")
+    print(f"  Verifiers used: {len(ws_model.verifier_idxs)}")
+    print(f"  Verifier names: {[ws_model.verifier_names[i] for i in ws_model.verifier_idxs]}")
 
 def save_weaver_scores_to_dataset(data, model, all_test_results, args):
     """Save Weaver scores/probabilities to dataset for distillation."""
@@ -556,7 +607,8 @@ def train(args):
         save_weaver_scores_to_dataset(data, model, df_test, args)
 
     if args.data_cfg.get('save_weaver_model', False):
-        save_weaver_model(model, df_test, args)
+        print("Saving Weaver model...")
+        save_weaver_model(model, args)
         
     if wandb.run:
             wandb_url = wandb.run.get_url()
