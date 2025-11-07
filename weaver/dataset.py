@@ -66,13 +66,10 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                     data[col] = data[col] + list(col_data)
         
             for verifier_name in verifiers_list:
-                print("Verifying verifier:", verifier_name)
                 if verifier_name.startswith('~'):
-                    print("Found verifier:", f'verifier/{verifier_name[1:]}' in h5f, "in", h5_path)
-                    verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
+                    verifier_data = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
                 else:
-                    print("Found verifier:", f'verifier/{verifier_name}' in h5f)
-                    verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
+                    verifier_data = h5f['verifier'][verifier_name][:].tolist()
                 if verifier_name not in data:
                     data[verifier_name] = verifier_data
                 else:
