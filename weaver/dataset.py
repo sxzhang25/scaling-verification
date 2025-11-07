@@ -24,16 +24,13 @@ from collections import defaultdict
 import warnings
 import itertools
 
-def create_df_from_h5(h5_path: str, verifiers_path: str = None, data_only: bool = False):
-    verifiers_list = None
+def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False):
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
             verifier_names = f.read().splitlines()
         verifiers_list = [v.strip() for v in verifier_names]
     with h5py.File(h5_path, 'r') as h5f:
         data = {key: h5f[key][:].tolist() for key in h5f.keys() if key != 'verifier'}
-        # for key in data.keys():
-        #     print(key, len(data[key]))
 
         if verifiers_list is None:
             verifiers_list = [] if data_only else list(h5f['verifier'].keys())
@@ -42,22 +39,18 @@ def create_df_from_h5(h5_path: str, verifiers_path: str = None, data_only: bool 
                 data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
             else:
                 data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
-            # print(len(data[verifier_name]))
 
     return pd.DataFrame(data)
 
 
-def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None, data_only: bool = False):
+def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False):
     # Read verifiers
-    verifiers_list = None
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
             verifier_names = f.read().splitlines()
         verifiers_list = [v.strip() for v in verifier_names]
 
     data = {}
-    print("verifiers_path:", verifiers_path)
-    print("verifiers_list:", verifiers_list)
     for i, h5_path in enumerate(h5_paths):
         with h5py.File(h5_path, 'r') as h5f:
             # Get the target group or root
@@ -73,10 +66,13 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_path: str = None, data_onl
                     data[col] = data[col] + list(col_data)
         
             for verifier_name in verifiers_list:
+                print("Verifying verifier:", verifier_name)
                 if verifier_name.startswith('~'):
-                    verifier_data = (1 - h5f[f'verifier/{verifier_name[1:]}'][:]).tolist()
+                    print("Found verifier:", f'verifier/{verifier_name[1:]}' in h5f, "in", h5_path)
+                    verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
                 else:
-                    verifier_data = h5f[f'verifier/{verifier_name}'][:].tolist()
+                    print("Found verifier:", f'verifier/{verifier_name}' in h5f)
+                    verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
                 if verifier_name not in data:
                     data[verifier_name] = verifier_data
                 else:
@@ -844,7 +840,7 @@ class VerificationDataset:
             # Users can pass local or remote dataset
             try:
                 if isinstance(self.dataset_path, list):
-                    df = create_df_from_h5s(self.dataset_path, self.verifier_cfg.verifier_subset)
+                    df = create_df_from_h5s(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset)
                 else:
                     if os.path.exists(self.dataset_path):
                         # If the dataset path is a parquet file, load using HF dataset from parquet
@@ -852,7 +848,7 @@ class VerificationDataset:
                             df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
                         elif self.dataset_path.endswith(".h5"):
                             assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
-                            df = create_df_from_h5(self.dataset_path, self.verifier_cfg.verifier_subset)
+                            df = create_df_from_h5(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset)
                         else:
                             df = pd.DataFrame(load_from_disk(self.dataset_path))
                     else:

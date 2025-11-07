@@ -112,7 +112,7 @@ def save_weaver_scores_to_dataset(data, model, all_test_results, args):
         if dataset_path.endswith(".parquet"):
             df = pd.DataFrame(load_dataset("parquet", data_files=dataset_path)['train'])
         elif dataset_path.endswith(".h5"):
-            df = create_df_from_h5(dataset_path, args.verifier_cfg.verifier_subset)
+            df = create_df_from_h5(dataset_path, verifiers_path=args.verifier_cfg.verifier_subset)
         else:
             df = pd.DataFrame(load_from_disk(dataset_path))
     else:
@@ -418,6 +418,14 @@ def main(args) -> None:
         args.data_cfg.train_samples = 10 # number of samples to sample from train split
         args.data_cfg.same_train_test = True
         args.logging = "none"
+
+    # If verifiers list is empty, return
+    if args.verifier_cfg.get('verifier_subset', None) is not None:
+        with open(args.verifier_cfg.verifier_subset, 'r') as f:
+            verifier_names = [line.strip() for line in f.readlines()]
+        if len(verifier_names) == 0:
+            print("No verifiers found in the subset file. Exiting...")
+            return
 
     print("W&B config: ", args.wandb_cfg)
     if args.logging == "wandb":
