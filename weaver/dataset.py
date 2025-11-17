@@ -24,7 +24,7 @@ from collections import defaultdict
 import warnings
 import itertools
 
-def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False):
+def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False, seed: int = 0):
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
             verifier_names = f.read().splitlines()
@@ -40,10 +40,15 @@ def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_
             else:
                 data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
 
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    # Use numpy's RandomState to ensure exact same permutation as in get_3dfront_correlated_verifiers.py
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(len(df))
+    df = df.iloc[indices].reset_index(drop=True)
+    return df
 
 
-def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False):
+def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False, seed: int = 0):
     # Read verifiers
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
@@ -66,18 +71,21 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                     data[col] = data[col] + list(col_data)
         
             for verifier_name in verifiers_list:
-                print("Verifying verifier:", verifier_name)
                 if verifier_name.startswith('~'):
-                    print("Found verifier:", f'verifier/{verifier_name[1:]}' in h5f, "in", h5_path)
                     verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
                 else:
-                    print("Found verifier:", f'verifier/{verifier_name}' in h5f)
                     verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
                 if verifier_name not in data:
                     data[verifier_name] = verifier_data
                 else:
                     data[verifier_name] = data[verifier_name] + verifier_data
-    return pd.DataFrame(data)
+                    
+    df = pd.DataFrame(data)
+    # Use numpy's RandomState to ensure exact same permutation as in get_3dfront_correlated_verifiers.py
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(len(df))
+    df = df.iloc[indices].reset_index(drop=True)
+    return df
 
 
 def from_cluster_list_to_dict(labels):
@@ -840,7 +848,7 @@ class VerificationDataset:
             # Users can pass local or remote dataset
             try:
                 if isinstance(self.dataset_path, list):
-                    df = create_df_from_h5s(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset)
+                    df = create_df_from_h5s(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset, seed=self.random_seed)
                 else:
                     if os.path.exists(self.dataset_path):
                         # If the dataset path is a parquet file, load using HF dataset from parquet
@@ -848,7 +856,7 @@ class VerificationDataset:
                             df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
                         elif self.dataset_path.endswith(".h5"):
                             assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
-                            df = create_df_from_h5(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset)
+                            df = create_df_from_h5(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset, seed=self.random_seed)
                         else:
                             df = pd.DataFrame(load_from_disk(self.dataset_path))
                     else:
