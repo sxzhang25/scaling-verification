@@ -1411,9 +1411,9 @@ class WeakSupervised(LabelModel):
         for i, v_idx in enumerate(self.verifier_idxs):
             verifier_name = self.verifier_names[v_idx]
             if verifier_name.startswith('VerifierType'):
-                verifier_name = self.verifier_names[v_idx].split('.')[1]
+                verifier_name = self.verifier_names[v_idx].split('.', 1)[1]
             if verifier_name.startswith('~VerifierType'):
-                verifier_name = "~" + self.verifier_names[v_idx].split('.')[1]
+                verifier_name = "~" + self.verifier_names[v_idx].split('.', 1)[1]
             p_s0_y0 = self.mu[2 * i, 0]
             p_s1_y1 = self.mu[2 * i + 1, 1]
             print(f"{verifier_name:<50} | {p_s0_y0:<10.2f} | {p_s1_y1:<10.2f}")

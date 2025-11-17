@@ -421,6 +421,7 @@ def main(args) -> None:
 
     # If verifiers list is empty, return
     if args.verifier_cfg.get('verifier_subset', None) is not None:
+        print("Using verifier subset file: ", args.verifier_cfg.verifier_subset)
         with open(args.verifier_cfg.verifier_subset, 'r') as f:
             verifier_names = [line.strip() for line in f.readlines()]
         if len(verifier_names) == 0:
