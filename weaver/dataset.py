@@ -36,7 +36,10 @@ def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_
             verifiers_list = [] if data_only else list(h5f['verifier'].keys())
         for verifier_name in verifiers_list:
             if verifier_name.startswith('~'):
-                data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
+                if verifier_name in h5f['verifier'].keys():
+                    data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
+                else:
+                    data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
             else:
                 data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
 
@@ -72,7 +75,10 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
         
             for verifier_name in verifiers_list:
                 if verifier_name.startswith('~'):
-                    verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
+                    if verifier_name in h5f['verifier'].keys():
+                        verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
+                    else:
+                        verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
                 else:
                     verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
                 if verifier_name not in data:
