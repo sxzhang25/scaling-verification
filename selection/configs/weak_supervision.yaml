@@ -46,7 +46,7 @@ model_cfg:
 fit_cfg:
   fit_type: "wclosest_to_train" # Options: "wclosest_to_train", "search_weights"
 
-logging: "wandb"
+logging: null #"wandb"
 wandb_cfg:
   project: "verification"
   entity: "${oc.env:WANDB_ENTITY}"
