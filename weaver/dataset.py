@@ -861,7 +861,7 @@ class VerificationDataset:
                         if self.dataset_path.endswith(".parquet"):
                             df = pd.DataFrame(load_dataset("parquet", data_files=self.dataset_path)['train'])
                         elif self.dataset_path.endswith(".h5"):
-                            assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str, "Verifier names must be provided for h5 dataset"
+                            assert (type(self.verifier_cfg.verifier_subset) == list and len(self.verifier_cfg.verifier_subset) == 0) or type(self.verifier_cfg.verifier_subset) == str or self.verifier_cfg.verifier_subset is None, "Verifier names must be provided for h5 dataset"
                             df = create_df_from_h5(self.dataset_path, verifiers_path=self.verifier_cfg.verifier_subset, seed=self.random_seed)
                         else:
                             df = pd.DataFrame(load_from_disk(self.dataset_path))
