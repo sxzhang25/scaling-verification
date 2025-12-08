@@ -1252,6 +1252,7 @@ class WeakSupervised(LabelModel):
                 rule = self.drop_imbalanced_verifiers
 
             marginals = X.mean(axis=0)  # Use all data for marginals calculation
+            print(f"Marginals: {marginals}", flush=True)
             balanced_idxs = self._get_balanced_idxs(marginals, rule)
             discarded_names = [v for i, v in enumerate(self.verifier_names) if i not in balanced_idxs]
             balanced_names = [v for i, v in enumerate(self.verifier_names) if i in balanced_idxs]
@@ -1331,7 +1332,7 @@ class WeakSupervised(LabelModel):
                 X+1, # binary votes (shifted by 1) 
                 deps = deps if self.use_deps == 'model' else [], # for now, no dependencies
                 L_train_continuous=None,
-                abstains=False, 
+                abstains=True, # TODO: restore to False
                 symmetric=False, 
                 n_epochs=self.n_epochs, 
                 mu_epochs = self.mu_epochs,
