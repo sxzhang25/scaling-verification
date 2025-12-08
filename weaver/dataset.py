@@ -39,15 +39,14 @@ def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_
                 if verifier_name in h5f['verifier'].keys():
                     data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
                 else:
-                    data[verifier_name] = (1 - h5f['verifier'][verifier_name[1:]][:]).tolist()
+                    # Properly negate: flip 0↔1 but keep -1 (abstain) unchanged
+                    original = h5f['verifier'][verifier_name[1:]][:]
+                    negated = np.where(original == -1, -1, 1 - original)
+                    data[verifier_name] = negated.tolist()
             else:
                 data[verifier_name] = h5f['verifier'][verifier_name][:].tolist()
 
     df = pd.DataFrame(data)
-    # Use numpy's RandomState to ensure exact same permutation as in get_3dfront_correlated_verifiers.py
-    rng = np.random.RandomState(seed)
-    indices = rng.permutation(len(df))
-    df = df.iloc[indices].reset_index(drop=True)
     return df
 
 
@@ -64,7 +63,6 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
             # Get the target group or root
             if verifiers_list is None:
                 verifiers_list = [] if data_only else list(h5f['verifier'].keys())
-            # print(verifier_names)
             
             for col in ['instruction', 'samples', 'answer_correct']:
                 col_data = h5f[col][:]
@@ -78,7 +76,9 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                     if verifier_name in h5f['verifier'].keys():
                         verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
                     else:
-                        verifier_data = (1 - h5f[f'verifier'][verifier_name[1:]][:]).tolist()
+                        # Properly negate: flip 0↔1 but keep -1 (abstain) unchanged
+                        original = h5f[f'verifier'][verifier_name[1:]][:]
+                        verifier_data = np.where(original == -1, -1, 1 - original).tolist()
                 else:
                     verifier_data = h5f[f'verifier'][verifier_name][:].tolist()
                 if verifier_name not in data:
@@ -87,10 +87,6 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                     data[verifier_name] = data[verifier_name] + verifier_data
                     
     df = pd.DataFrame(data)
-    # Use numpy's RandomState to ensure exact same permutation as in get_3dfront_correlated_verifiers.py
-    rng = np.random.RandomState(seed)
-    indices = rng.permutation(len(df))
-    df = df.iloc[indices].reset_index(drop=True)
     return df
 
 
