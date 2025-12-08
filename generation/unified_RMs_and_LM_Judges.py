@@ -60,6 +60,8 @@ def preprocess_h5_dataset(
         # Load dataset
         logger.info(f"Loading dataset from {path}")
         dataset = create_df_from_h5(path, data_only=True)
+        for key in ['samples', 'instruction', 'answer_correct']:
+            logger.info(f"dataset[{key}]: {dataset[key]}")
                     
         # Validate required columns
         required_columns = {'instruction', 'samples'}
@@ -95,8 +97,6 @@ def preprocess_h5_dataset(
             f"- Samples per instruction: {len(dataset['samples'][0])}\n"
             # f"- Available columns: {list(dataset.keys())}"
         )
-
-        
         
         return dataset
         
@@ -1155,6 +1155,7 @@ def main():
         )
         
         # Save final dataset
+        print("dataset answer_correct:", dataset['answer_correct'])
         final_dataset = post_process_dataset(dataset, metadata, is_h5, logger)
         print("final_dataset:", final_dataset.keys())
         if is_h5:
@@ -1174,18 +1175,22 @@ def main():
                 h5f.create_dataset('samples', data=samples_arr, dtype=dt_samples)
                 
                 # Save `answer_correct` as an n_tasks x n_samples boolean array
-                answer_correct_arr = np.array(final_dataset["answer_correct"], dtype=bool)
+                answer_correct_arr = np.array(final_dataset["answer_correct"].tolist(), dtype=bool)
+                logger.info(f"answer_correct_arr.shape: {answer_correct_arr.shape}")
                 if 'answer_correct' in h5f:
                     del h5f['answer_correct']
                 h5f.create_dataset('answer_correct', data=answer_correct_arr, dtype='bool')
 
+                # Create verifier group for all score/verdict data
+                if 'verifier' in h5f:
+                    del h5f['verifier']
+                verifier_grp = h5f.create_group('verifier')
+                
                 for key in final_dataset.keys():
                     if key not in ['instruction', 'samples', 'answer_correct']:
                         # If verdicts_arr is a pandas Series, convert it to a numpy array suitable for h5py
                         verdicts_arr = np.array(final_dataset[key].tolist())
-                        if key in h5f:
-                            del h5f[key]
-                        h5f.create_dataset(key, data=verdicts_arr, dtype='float')
+                        verifier_grp.create_dataset(key, data=verdicts_arr, dtype='float')
         else:
             DatasetDict({"data": final_dataset}).save_to_disk(args.output_path)
         logger.info(f"Dataset saved locally to: {args.output_path}")

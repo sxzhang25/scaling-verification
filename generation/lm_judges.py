@@ -97,7 +97,7 @@ def create_scenegen_evaluation_prompt(instruction: str, sample: str) -> List[Dic
     prevent parts of the room from being accessed, this is an error. If objects do not face the correct direction, this is an error. Check for other 
     errors of similar nature.
     
-    Then respond with EXACTLY "True" if you have high confidence the scene is valid and high quality, or "False" if you have meaningful doubts.
+    Then respond with EXACTLY "True" if you have high confidence the scene is valid, or "False" otherwise.
     
     Your response should be structured as:
     A single line containing only "True" or "False" 
