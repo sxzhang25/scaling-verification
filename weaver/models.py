@@ -136,6 +136,8 @@ def calculate_sample_metrics(probs, y, return_flat=True):
 
     # For each sample, calculate the accuracy of the prediction
     selected_cls_per_sample = np.argmax(probs, axis=1)
+    # print('probs:', probs)
+    # print('selected_cls_per_sample:', selected_cls_per_sample)
     accuracy = (y == selected_cls_per_sample).astype(int)
 
     # Calculate the TPR and TNR
@@ -1129,7 +1131,7 @@ class WeakSupervised(LabelModel):
         triple_names = [v for i, v in enumerate(current_verifiers) if i in top_triple]
         print(f"Top triple: {triple_names}, sparsity: {sorted_sparsity[top_triple]}", flush=True)
         if any(triple_to_marginal[top_triple] > 0.9) or any(triple_to_marginal[top_triple] < 0.1):
-            print(f"WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
+            print(f"[model.py] WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
             
         
         # Add these lines to calculate and print the density of the selected triple
@@ -1421,6 +1423,21 @@ class WeakSupervised(LabelModel):
         print(80 * "-")
 
     def predict_proba(self, X):
+        # print(80 * "-")
+        # print(f"{'Verifier Name':<50} | {'P(S=0|Y=1)':<10} | {'P(S=1|Y=1)':<10}")
+        # print(80 * "-")
+        # for i, v_idx in enumerate(self.verifier_idxs):
+        #     verifier_name = self.verifier_names[v_idx]
+        #     if verifier_name.startswith('VerifierType'):
+        #         verifier_name = self.verifier_names[v_idx].split('.', 1)[1]
+        #     if verifier_name.startswith('~VerifierType'):
+        #         verifier_name = "~" + self.verifier_names[v_idx].split('.', 1)[1]
+        #     p_s0_y0 = self.mu[2 * i, 0]
+        #     p_s0_y1 = self.mu[2 * i, 1]
+        #     p_s1_y1 = self.mu[2 * i + 1, 1]
+        #     print(f"{verifier_name:<50} | {p_s0_y1:<10.2f} | {p_s1_y1:<10.2f}")
+        # print(80 * "-")
+
         X = X[:, self.verifier_idxs] # use only the verifiers that were used to fit the model
         if self.use_continuous:
             probs = np.zeros((X.shape[0], 2))
@@ -1566,7 +1583,7 @@ class NaiveBayes(Model):
         triple_names = [v for i, v in enumerate(current_verifiers) if i in top_triple]
         print(f"Top triple: {triple_names}, sparsity: {sorted_sparsity[top_triple]}", flush=True)
         if any(triple_to_marginal[top_triple] > 0.9) or any(triple_to_marginal[top_triple] < 0.1):
-            print(f"WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
+            print(f"[model.py] WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
 
         top_triple = np.array(list(top_triple))
         votes = votes[:, top_triple]

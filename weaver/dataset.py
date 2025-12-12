@@ -1556,7 +1556,7 @@ class VerificationDataset:
             triple_names = [v for i, v in enumerate(current_verifiers) if i in top_triple]
             print(f"Top triple: {triple_names}, sparsity: {sorted_sparsity[top_triple]}", flush=True)
             if any(triple_to_marginal[top_triple] > 0.9) or any(triple_to_marginal[top_triple] < 0.1):
-                print(f"WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
+                print(f"[dataset.py] WARNING: Some of the verifiers in the top triple have marginal probabilities that are too extreme: {triple_names}, {triple_to_marginal[top_triple]}", flush=True)
                 
             
             # Add these lines to calculate and print the density of the selected triple
