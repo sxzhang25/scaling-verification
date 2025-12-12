@@ -51,7 +51,10 @@ def save_weaver_model(model, args):
         "metric": ws_model.metric,
         "p": ws_model.p.tolist() if hasattr(ws_model.p, 'tolist') else list(ws_model.p),
         "P": ws_model.P.detach().cpu().numpy() if hasattr(ws_model.P, 'detach') else ws_model.P,
+        "dataset_path": args.data_cfg.dataset_path,
     }
+
+    print("Saved dataset path:", args.data_cfg.dataset_path)
     
     # Save continuous model parameters if applicable
     if ws_model.use_continuous:
