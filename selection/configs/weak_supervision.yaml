@@ -65,6 +65,8 @@ model_params:
     use_deps: "drop" # Options: "none", "drop", "model"
     deps_data_fraction: 0.01
     use_label_on_test: true
+    dev_set_path: null # Optional: path to dev set indices file (format: "problem_idx sample_idx" per line, or single flat index per line)
+    dev_set_labels_path: null # Optional: path to dev set labels file (one label per line, 0 or 1, matching order of dev_set_path)
     drop_imbalanced_verifiers: "all" # Options: null, "all", "small", "large"
     drop_k: 100 # Number of verifiers to select
     cb_args:

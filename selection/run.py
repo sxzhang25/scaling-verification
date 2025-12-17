@@ -626,6 +626,8 @@ def train(args):
             wandb_url = wandb.run.get_url()
             console.print(f"\n[bold blue]Results logged to W&B:[/bold blue] {wandb_url}")
 
+    return df_train, df_test
+
 
 if __name__ == "__main__":
     main()

@@ -209,12 +209,16 @@ class Model:
         """
         Fit the model on the training data.
         """
-
+        num_samples_per_problem = None
         if not(self.model_type in ["majority_vote"]) and X.ndim == 3:
+            num_samples_per_problem = X.shape[1]  # Extract before flattening
             X = np.vstack(X)
             y = np.concatenate(y)
 
         model = self.get_model(group_idx)
+        # Pass num_samples_per_problem to model for dev set index conversion
+        if hasattr(model, '_num_samples_per_problem'):
+            model._num_samples_per_problem = num_samples_per_problem
         model.fit(X, y, **kwargs)
         if group_idx is not None:
             self.is_trained[group_idx] = True
@@ -1027,20 +1031,157 @@ class WeakSupervised(LabelModel):
         self.drop_at_test = kwargs.get("drop_at_test", True)
         # when True: if we want to drop all verifiers, drop none:
         self.drop_imbalanced_fallback = kwargs.get("drop_imbalanced_fallback", False)
+        if kwargs.get("dev_set_path", None) is not None:
+            print(f"Parsing dev set file: {kwargs.get('dev_set_path')}", flush=True)
+            self.dev_set_indices = self._parse_dev_set_file(kwargs.get("dev_set_path"))
+        else:
+            print("No dev set file provided", flush=True)
+            self.dev_set_indices = None
+        
+        # Parse external dev set labels if provided
+        if kwargs.get("dev_set_labels_path", None) is not None:
+            print(f"Parsing dev set labels file: {kwargs.get('dev_set_labels_path')}", flush=True)
+            self.dev_set_labels = self._parse_dev_set_labels_file(kwargs.get("dev_set_labels_path"))
+        else:
+            self.dev_set_labels = None
+        
+        # Store number of samples per problem for flat index conversion (set during fit)
+        self._num_samples_per_problem = None
+
+    def _parse_dev_set_file(self, dev_set_path):
+        """
+        Parse dev set file with indices in (problem_idx, sample_idx) format.
+        Each line should contain: problem_idx sample_idx (space-separated)
+        
+        Returns:
+            List of tuples or ints: [(problem_idx, sample_idx), ...] or [flat_idx, ...]
+        """
+        dev_set_indices = []
+        with open(dev_set_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) == 2:
+                    problem_idx, sample_idx = int(parts[0]), int(parts[1])
+                    dev_set_indices.append((problem_idx, sample_idx))
+                elif len(parts) == 1:
+                    # Fallback: support old format with just flat indices
+                    dev_set_indices.append(int(parts[0]))
+                else:
+                    raise ValueError(f"Invalid dev set line format: {line}. Expected 'problem_idx sample_idx' or single flat index.")
+        return dev_set_indices
+
+    def _parse_dev_set_labels_file(self, labels_path):
+        """
+        Parse dev set labels file. Each line should contain a single label (0 or 1).
+        The order should match the order of indices in the dev set file.
+        
+        Returns:
+            np.ndarray of labels
+        """
+        labels = []
+        with open(labels_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                labels.append(int(line))
+        return np.array(labels)
+
+    def _get_dev_set_flat_indices(self, num_samples_per_problem):
+        """
+        Convert dev set indices from (problem_idx, sample_idx) format to flat indices.
+        
+        Args:
+            num_samples_per_problem: Number of samples per problem (for computing flat index)
+            
+        Returns:
+            np.ndarray of flat indices, or None if no dev set
+        """
+        if self.dev_set_indices is None:
+            return None
+        
+        flat_indices = []
+        for idx in self.dev_set_indices:
+            if isinstance(idx, tuple):
+                problem_idx, sample_idx = idx
+                flat_idx = problem_idx * num_samples_per_problem + sample_idx
+                flat_indices.append(flat_idx)
+            else:
+                # Already a flat index
+                flat_indices.append(idx)
+        return np.array(flat_indices)
+
+    def _get_subset_indices(self, n_total_samples, num_samples_per_problem=None):
+        """
+        Get indices to use for subsetting data (for dependency modeling, verifier dropping, etc.)
+        
+        If dev_set_indices is set, convert to flat indices and return them.
+        Otherwise, fall back to using data_fraction.
+        
+        Args:
+            n_total_samples: Total number of samples in the flattened data
+            num_samples_per_problem: Number of samples per problem (needed if dev_set uses (problem_idx, sample_idx) format)
+            
+        Returns:
+            np.ndarray of indices to use, or None if using all data
+        """
+        if self.dev_set_indices is not None:
+            flat_indices = self._get_dev_set_flat_indices(num_samples_per_problem)
+            if flat_indices is not None:
+                # Filter out indices that are out of bounds
+                valid_mask = flat_indices < n_total_samples
+                if not valid_mask.all():
+                    print(f"Warning: {(~valid_mask).sum()} dev set indices out of bounds, filtering them out.", flush=True)
+                    flat_indices = flat_indices[valid_mask]
+                print(f"Using dev set with {len(flat_indices)} samples for dependency modeling and verifier dropping.", flush=True)
+                return flat_indices
+        
+        # Fall back to data_fraction
+        data_fraction = getattr(self, 'deps_data_fraction', 1.0)
+        if data_fraction < 1.0:
+            n_samples_to_use = int(n_total_samples * data_fraction)
+            return np.arange(n_samples_to_use)
+        
+        return None  # Use all data
+
+    def _get_subset_labels(self, y, subset_indices):
+        """
+        Get labels for the subset. If external dev set labels are provided, use those.
+        Otherwise, use labels from the dataset at the subset indices.
+        
+        Args:
+            y: Full labels array from the dataset
+            subset_indices: Indices of the subset (or None if using all data)
+            
+        Returns:
+            np.ndarray of labels for the subset
+        """
+        if self.dev_set_labels is not None:
+            # Use external labels
+            if subset_indices is not None and len(self.dev_set_labels) != len(subset_indices):
+                print(f"Warning: dev_set_labels length ({len(self.dev_set_labels)}) doesn't match subset_indices length ({len(subset_indices)}). Using external labels anyway.", flush=True)
+            print(f"Using external dev set labels ({len(self.dev_set_labels)} labels)", flush=True)
+            return self.dev_set_labels
+        
+        # Fall back to dataset labels at subset indices
+        if subset_indices is not None:
+            return y[subset_indices]
+        return y
 
     def _get_deps(self, votes, truth, density=0.1):
         # assumed  num_samples x num_verifiers
         # For now, assume we have access to the true covariance matrix --- stack both votes and labels
         
-        # Use only a fraction of the data for dependency modeling if specified
-        data_fraction = getattr(self, 'deps_data_fraction', 1.0)
-        if data_fraction < 1.0:
-            print(f"Using first {data_fraction} fraction of data for dependency modeling.", flush=True)
-            n_samples = len(votes)
-            n_samples_to_use = int(n_samples * data_fraction)
-            # Use the first n_samples_to_use samples
-            votes = votes[:n_samples_to_use]
-            truth = truth[:n_samples_to_use]
+        # Use dev set or data_fraction for subsetting
+        subset_indices = self._get_subset_indices(len(votes), self._num_samples_per_problem)
+        print(f"Subset indices: {subset_indices}", flush=True)
+        if subset_indices is not None:
+            votes = votes[subset_indices]
+        # Get labels (use external dev set labels if provided, otherwise use dataset labels)
+        truth = self._get_subset_labels(truth, subset_indices)
             
         all_scores = np.hstack([votes, truth[:, np.newaxis]])
         cov = np.cov(all_scores.T)
@@ -1074,19 +1215,15 @@ class WeakSupervised(LabelModel):
             Select the top k maximally independent verifiers based on the inverse covariance matrix of the scores.
             Same function as in WS.
         """
-        # Use only a fraction of the data for dependency modeling if specified
-        data_fraction = getattr(self, 'deps_data_fraction', 1.0)
-        if data_fraction < 1.0:
-            print(f"Using first {data_fraction} fraction of data for dependency modeling.", flush=True)
-            n_samples = len(votes)
-            n_samples_to_use = int(n_samples * data_fraction)
-
-            if n_samples_to_use == 1:
+        # Use dev set or data_fraction for subsetting
+        subset_indices = self._get_subset_indices(len(votes), self._num_samples_per_problem)
+        print(f"Subset indices: {subset_indices}", flush=True)
+        if subset_indices is not None:
+            if len(subset_indices) == 1:
                 return votes, np.arange(votes.shape[-1])
-
-            # Use the first n_samples_to_use samples
-            votes = votes[:n_samples_to_use]
-            truth = truth[:n_samples_to_use]
+            votes = votes[subset_indices]
+        # Get labels (use external dev set labels if provided, otherwise use dataset labels)
+        truth = self._get_subset_labels(truth, subset_indices)
 
         # Use drop_k from config if k is not provided
         k = self.drop_k if k is None else k
@@ -1222,18 +1359,16 @@ class WeakSupervised(LabelModel):
             # if we are testing, and we don't want to use labels 
             # then fix to float
 
-            # Get data fraction for both class balance and verifier dropping
-            data_fraction = getattr(self, 'deps_data_fraction', 1.0)
-            if data_fraction < 1.0:
-                print(f"Using first {data_fraction} fraction of data for dependency modeling and verifier dropping.", flush=True)
-                n_samples = len(y)
-                n_samples_to_use = int(n_samples * data_fraction)
+            # Get subset indices for dependency modeling and verifier dropping
+            subset_indices = self._get_subset_indices(len(y), self._num_samples_per_problem)
+            print(f"Subset indices: {subset_indices}", flush=True)
+            if subset_indices is not None:
                 # Use subset of data for all label-dependent operations
-                X_subset = X[:n_samples_to_use]
-                y_subset = y[:n_samples_to_use]
+                X_subset = X[subset_indices]
             else:
                 X_subset = X
-                y_subset = y
+            # Get labels (use external dev set labels if provided, otherwise use dataset labels)
+            y_subset = self._get_subset_labels(y, subset_indices)
         else:
             X_subset = X
 

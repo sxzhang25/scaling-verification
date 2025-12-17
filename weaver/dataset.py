@@ -723,6 +723,12 @@ class VerificationDataset:
         self.use_deps = kwargs.get("use_deps", None)
         self.max_num_independent_verifiers = kwargs.get("max_num_independent_verifiers", 3)
 
+        self.dev_set_path = kwargs.get("dev_set_path", None)
+        if self.dev_set_path is not None:
+            self.dev_set_indices = self._parse_dev_set_file(self.dev_set_path)
+        else:
+            self.dev_set_indices = None
+
         # Add verifier augmentation config with defaults
         self.verifier_augmentation = kwargs.get('verifier_augmentation', {
             'smoothing': False,
@@ -744,6 +750,55 @@ class VerificationDataset:
             self.dataset_mapping = DATASET_TO_HF[dataset_name][model_size]  # Use predefined mapping
             
         self.split_training_data()
+
+    def _parse_dev_set_file(self, dev_set_path):
+        """
+        Parse dev set file with indices in (problem_idx, sample_idx) format.
+        Each line should contain: problem_idx sample_idx (space-separated)
+        
+        Returns:
+            List of tuples: [(problem_idx, sample_idx), ...]
+        """
+        dev_set_indices = []
+        with open(dev_set_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) == 2:
+                    problem_idx, sample_idx = int(parts[0]), int(parts[1])
+                    dev_set_indices.append((problem_idx, sample_idx))
+                elif len(parts) == 1:
+                    # Fallback: support old format with just flat indices
+                    dev_set_indices.append(int(parts[0]))
+                else:
+                    raise ValueError(f"Invalid dev set line format: {line}. Expected 'problem_idx sample_idx' or single flat index.")
+        return dev_set_indices
+
+    def get_dev_set_flat_indices(self, num_samples_per_problem):
+        """
+        Convert dev set indices from (problem_idx, sample_idx) format to flat indices.
+        
+        Args:
+            num_samples_per_problem: Number of samples per problem (for computing flat index)
+            
+        Returns:
+            np.ndarray of flat indices
+        """
+        if self.dev_set_indices is None:
+            return None
+        
+        flat_indices = []
+        for idx in self.dev_set_indices:
+            if isinstance(idx, tuple):
+                problem_idx, sample_idx = idx
+                flat_idx = problem_idx * num_samples_per_problem + sample_idx
+                flat_indices.append(flat_idx)
+            else:
+                # Already a flat index
+                flat_indices.append(idx)
+        return np.array(flat_indices)
 
     def _smooth_verifier_scores(self, X):
         """Apply temporal smoothing to verifier scores."""
