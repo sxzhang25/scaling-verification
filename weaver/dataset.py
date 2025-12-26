@@ -954,7 +954,7 @@ class VerificationDataset:
                 df = df.loc[:, ~df.columns.duplicated()]
                 
         # Which verifiers to use:
-        print("df columns:", df.columns)
+        # print("df columns:", df.columns)
         if self.verifier_cfg.get("verifier_type", "all") == "all":
             verifier_names = all_reward_models + all_judges
         elif self.verifier_cfg.verifier_type == "reward_models":
@@ -1170,7 +1170,7 @@ class VerificationDataset:
         # we want to load the task data
         df, correct_key, all_verifiers = self.load_task_data()
         y_data = np.stack(df[correct_key].values).astype(int)
-        print("verifier_names:", verifier_names)
+        # print("verifier_names:", verifier_names)
 
         print(f"Number of problems: {len(y_data)} and samples: {len(y_data[0])}", flush=True)
 
