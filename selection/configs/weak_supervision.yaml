@@ -18,6 +18,7 @@ data_cfg:
   model_size: null # For dataset selection: "8B" or "70B" (not required if dataset_path defined)
   reward_threshold: 0.5 # Binarization threshold, null = no threshold
   save_weaver_scores: false # Save Weaver scores as column in custom dataset
+  scores_path: "scores.json"
   save_weaver_model: true
   model_path: "ws_model.pkl"
 
