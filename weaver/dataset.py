@@ -24,13 +24,15 @@ from collections import defaultdict
 import warnings
 import itertools
 
+IGNORE_KEYS = ['instruction', 'samples', 'answer_correct', 'images', 'notes']
+
 def create_df_from_h5(h5_path: str, verifiers_list: list[str] = None, verifiers_path: str = None, data_only: bool = False, seed: int = 0):
     if verifiers_path is not None:
         with open(verifiers_path, 'r') as f:
             verifier_names = f.read().splitlines()
         verifiers_list = [v.strip() for v in verifier_names]
     with h5py.File(h5_path, 'r') as h5f:
-        data = {key: h5f[key][:].tolist() for key in h5f.keys() if key != 'verifier'}
+        data = {key: h5f[key][:].tolist() for key in IGNORE_KEYS if key in h5f}
 
         if verifiers_list is None:
             verifiers_list = [] if data_only else list(h5f['verifier'].keys())
@@ -64,7 +66,9 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
             if verifiers_list is None:
                 verifiers_list = [] if data_only else list(h5f['verifier'].keys())
             
-            for col in ['instruction', 'samples', 'answer_correct']:
+            for col in IGNORE_KEYS:
+                if col not in h5f:
+                    continue
                 col_data = h5f[col][:]
                 if col not in data:
                     data[col] = col_data.tolist()
@@ -85,7 +89,6 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                     data[verifier_name] = verifier_data
                 else:
                     data[verifier_name] = data[verifier_name] + verifier_data
-                    
     df = pd.DataFrame(data)
     return df
 
@@ -673,6 +676,7 @@ class Normalizer:
             return False
 
     def normalize_score(self, X):
+        # print("X:", X, flush=True)
         # if X is all nan, return X
         if self.check_nan(X):
             return X
@@ -965,7 +969,7 @@ class VerificationDataset:
             verifier_names = self.verifier_cfg.verifier_subset
             assert all(v in all_reward_models + all_judges for v in verifier_names), f"Unknown verifiers: {verifier_names} from list {all_reward_models + all_judges}"
         elif self.verifier_cfg.verifier_type == "auto":
-            verifier_names = [c for c in df.columns if c not in ['instruction', 'samples', 'answer_correct']]
+            verifier_names = [c for c in df.columns if c not in IGNORE_KEYS]
         else:
             raise ValueError(f"Unknown verifier type: {self.verifier_cfg.verifier_type}")
 
@@ -1018,7 +1022,9 @@ class VerificationDataset:
 
         # Mask problems and verifiers with only NaN values
         mask_problems = ~np.isnan(X).all(axis=(1, 2))
-        mask_verifiers = ~np.isnan(X).all(axis=(0, 1))
+        # Include verifiers with only -1 values in addition to non-NaN verifiers
+        mask_verifiers = (~np.isnan(X).all(axis=(0, 1)))
+        # mask_verifiers = (~np.isnan(X).all(axis=(0, 1))) | ((X == -1).all(axis=(0, 1)))
 
         X = X[mask_problems][:, :, mask_verifiers]
         verifier_names = [v for v, keep in zip(verifier_names, mask_verifiers) if keep]
