@@ -90,6 +90,17 @@ def create_df_from_h5s(h5_paths: list[str], verifiers_list: list[str] = None, ve
                 else:
                     data[verifier_name] = data[verifier_name] + verifier_data
     df = pd.DataFrame(data)
+
+    # # print marginals
+    # for verifier_name in df.columns:
+    #     if verifier_name in IGNORE_KEYS:
+    #         continue
+    #     verifier_votes = np.array([v for v in df[verifier_name][:]]).flatten()
+    #     # print(f"Verifier {verifier_name}: {verifier_votes.shape}", flush=True)
+    #     positive_marginals = (verifier_votes == 1).mean()
+    #     negative_marginals = (verifier_votes == 0).mean()
+    #     abstain_marginals = (verifier_votes == -1).mean()
+    #     print(f"Verifier {verifier_name} -- positive_marginals: {positive_marginals}, negative_marginals: {negative_marginals}, abstain_marginals: {abstain_marginals}", flush=True)
     return df
 
 
@@ -680,11 +691,23 @@ class Normalizer:
         # if X is all nan, return X
         if self.check_nan(X):
             return X
+        
+        # Check if data is already in discrete vote format (-1, 0, 1)
+        # If so, skip normalization to preserve the original vote structure
+        unique_values = np.unique(X[~np.isnan(X)])
+        if len(unique_values) <= 3:
+            # Check if values are only -1, 0, 1 (or subset thereof)
+            if np.all(np.isin(unique_values, [-1, 0, 1])):
+                return X  # Skip normalization, preserve discrete votes
+        
         # if X in the range [0,1], return X
         if self.check_range(X):
             return X
 
-        if self.normalize_method == "minmax":
+        if self.normalize_method == "none" or self.normalize_method is None:
+            # Skip normalization entirely
+            return X
+        elif self.normalize_method == "minmax":
             output = self.normalize_minmax(X)
 
         elif self.normalize_method == "quantile":
@@ -1070,12 +1093,16 @@ class VerificationDataset:
             X_data, y = self.test_data
 
         num_problems, _, num_verifiers = X_data.shape
+        # print("X_data unique values:", np.unique(X_data), flush=True)
 
         assert self.reward_threshold is not None, "Reward threshold must be specified for binarization: float (e.g. 0.5), cb, cb_per_problem, cb_per_cluster"
 
         if type(self.reward_threshold) == float:
             print(f"Binarizing reward model outputs with threshold: {self.reward_threshold}", flush=True)
+            # Preserve -1 (abstain) values, only binarize non-abstain values
+            abstain_mask = (X_data == -1)
             X_data = (X_data >= self.reward_threshold).astype(int)
+            X_data[abstain_mask] = -1  # Restore abstain values
         elif self.reward_threshold == "cb":
             print(f"Binarizing reward model outputs using overall dataset difficulty (class balance)", flush=True)
             cb = y.mean() 
@@ -1085,11 +1112,21 @@ class VerificationDataset:
                     # this is a judge, don't threshold
                     threshold.append(0.5)
                 else:
-                    sorted_verifier_scores = np.sort(X_data[:, :, i].flatten())
-                    index = int(np.ceil((1-cb) * len(sorted_verifier_scores))) - 1
-                    threshold.append(sorted_verifier_scores[index])
+                    # Exclude -1 (abstain) values when computing threshold
+                    verifier_scores = X_data[:, :, i].flatten()
+                    non_abstain_scores = verifier_scores[verifier_scores != -1]
+                    if len(non_abstain_scores) > 0:
+                        sorted_verifier_scores = np.sort(non_abstain_scores)
+                        index = int(np.ceil((1-cb) * len(sorted_verifier_scores))) - 1
+                        threshold.append(sorted_verifier_scores[index])
+                    else:
+                        # All values are -1, use default threshold
+                        threshold.append(0.5)
             threshold = np.array(threshold)
+            # Preserve -1 (abstain) values, only binarize non-abstain values
+            abstain_mask = (X_data == -1)
             X_data = (X_data >= threshold).astype(float)
+            X_data[abstain_mask] = -1  # Restore abstain values
         elif self.reward_threshold == "cb_per_problem":
             print("Binarizing reward model outputs using per problem difficulty (class balance)", flush=True)
             cb_per_problem = y.mean(axis=1) 
@@ -1110,10 +1147,23 @@ class VerificationDataset:
             cb_indices = np.clip(cb_indices, 0, X_data.shape[1] - 1)  # safety
 
             for i in nonbinary_idx:
-                sorted_scores = np.sort(X_data[:, :, i], axis=1)  
-                threshold[:, i] = sorted_scores[np.arange(num_problems), cb_indices[:, 0]]
+                # Exclude -1 (abstain) values when computing per-problem thresholds
+                for prob_idx in range(num_problems):
+                    problem_scores = X_data[prob_idx, :, i]
+                    non_abstain_scores = problem_scores[problem_scores != -1]
+                    if len(non_abstain_scores) > 0:
+                        sorted_scores = np.sort(non_abstain_scores)
+                        cb_idx = int(np.ceil((1 - cb_per_problem[prob_idx]) * len(sorted_scores))) - 1
+                        cb_idx = np.clip(cb_idx, 0, len(sorted_scores) - 1)
+                        threshold[prob_idx, i] = sorted_scores[cb_idx]
+                    else:
+                        # All values are -1, use default threshold
+                        threshold[prob_idx, i] = 0.5
 
+            # Preserve -1 (abstain) values, only binarize non-abstain values
+            abstain_mask = (X_data == -1)
             X_data = (X_data >= threshold[:, np.newaxis, :]).astype(float)
+            X_data[abstain_mask] = -1  # Restore abstain values
         elif self.reward_threshold == "cb_per_cluster":
             assert self.train_split == 1.0, "cb_per_cluster is only supported for train=test"
             assert clusters is not None, "cb_per_cluster requires clusters to be provided"
@@ -1127,15 +1177,25 @@ class VerificationDataset:
                         # this is a judge, don't threshold
                         continue
                     else:
-                        sorted_verifier_scores = np.sort(X_data[clusters[j], :, i].flatten())
-                        index = int(np.ceil((1-cb_per_cluster[j]) * len(sorted_verifier_scores))) - 1
-                        threshold[j, i] = sorted_verifier_scores[index]
+                        # Exclude -1 (abstain) values when computing threshold
+                        cluster_scores = X_data[clusters[j], :, i].flatten()
+                        non_abstain_scores = cluster_scores[cluster_scores != -1]
+                        if len(non_abstain_scores) > 0:
+                            sorted_verifier_scores = np.sort(non_abstain_scores)
+                            index = int(np.ceil((1-cb_per_cluster[j]) * len(sorted_verifier_scores))) - 1
+                            threshold[j, i] = sorted_verifier_scores[index]
+                        else:
+                            # All values are -1, use default threshold
+                            threshold[j, i] = 0.5
 
             # convert threshold per cluster into threshold per problem 
             threshold_per_n = np.zeros((num_problems, num_verifiers))
             for cluster_id, indices in clusters.items():
                 threshold_per_n[indices] = threshold[cluster_id] 
+            # Preserve -1 (abstain) values, only binarize non-abstain values
+            abstain_mask = (X_data == -1)
             X_data = (X_data >= threshold_per_n[:, np.newaxis, :]).astype(float)
+            X_data[abstain_mask] = -1  # Restore abstain values
 
         # update X 
         if split == "train":
@@ -1655,7 +1715,7 @@ class VerificationDataset:
             balanced_v_idxs = _get_balanced_idxs(marginals, rule)
             discarded_names = [v for i, v in enumerate(self.verifier_names) if i not in balanced_v_idxs]
             balanced_names = [v for i, v in enumerate(self.verifier_names) if i in balanced_v_idxs]
-            print(f"\nDiscarding {len(discarded_names)} verifiers: \n{discarded_names}", flush=True)
+            print(f"\n[dataset.py] Discarding {len(discarded_names)} verifiers: \n{discarded_names}", flush=True)
             self.verifier_idxs = balanced_v_idxs
 
             train_data, y_train = self.train_data

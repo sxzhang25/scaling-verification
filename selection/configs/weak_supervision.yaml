@@ -19,13 +19,13 @@ data_cfg:
   reward_threshold: 0.5 # Binarization threshold, null = no threshold
   save_weaver_scores: false # Save Weaver scores as column in custom dataset
   scores_path: "scores.json"
-  save_weaver_model: true
+  save_weaver_model: false
   model_path: "ws_model.pkl"
 
   
   # Score normalization
   normalize_type: "all_problems" # Options: "per_problem", "all_problems"
-  normalize_method: "minmax" # Options: "minmax", "quantile", "winsorize"
+  normalize_method: "none" # Options: "minmax", "quantile", "winsorize", "none"
   normalize_params: ${normalize_method_params.${data_cfg.normalize_method}}
   
   # Problem similarity (for per-problem models)
@@ -70,6 +70,7 @@ model_params:
     dev_set_labels_path: null # Optional: path to dev set labels file (one label per line, 0 or 1, matching order of dev_set_path)
     drop_imbalanced_verifiers: "all" # Options: null, "all", "small", "large"
     drop_k: 100 # Number of verifiers to select
+    drop_extreme_threshold: 0.9
     cb_args:
       class_balance: "labels" # Options: "labels" or float value
 
@@ -81,6 +82,9 @@ model_params:
 
 # Normalization method parameters
 normalize_method_params:
+  none:
+    tmp: # No parameters required (normalization disabled)
+    
   minmax:
     tmp: # No parameters required
     

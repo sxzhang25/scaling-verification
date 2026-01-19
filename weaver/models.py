@@ -1258,7 +1258,9 @@ class WeakSupervised(LabelModel):
             s = np.abs(selected_inv_cov).max()
             triple_to_sparsity[tuple(triple)] = s
             
-            marginals = votes[:, triple].mean(axis=0)
+            # Compute marginals as probability of voting 1 (positive)
+            # votes has values -1, 0, 1, so we compute P(vote == 1) for each verifier
+            marginals = (votes[:, triple] == 1).mean(axis=0)
             triple_to_marginal[tuple(triple)] = marginals
 
         # Use stable sort to ensure deterministic results
@@ -1292,7 +1294,13 @@ class WeakSupervised(LabelModel):
     def preprocess(self, X):
         assert X.ndim ==2
         if self.use_continuous == False:
-            assert len(np.unique(X)) in [1, 2], "X should be binarized, did you set reward_threshold?"
+            unique_values = np.unique(X)
+            # Allow discrete vote format (-1, 0, 1) when normalization is disabled
+            # Also allow binarized format (0, 1) or (0, 1, 2 after X+1)
+            is_discrete_votes = len(unique_values) <= 3 and np.all(np.isin(unique_values, [-1, 0, 1, 2]))
+            is_binarized = len(unique_values) in [1, 2] and np.all(np.isin(unique_values, [0, 1]))
+            if not (is_discrete_votes or is_binarized):
+                raise AssertionError(f"X should be binarized (0, 1) or discrete votes (-1, 0, 1), got unique values: {unique_values}. Did you set reward_threshold or disable normalization?")
         return X
 
     
@@ -1323,28 +1331,57 @@ class WeakSupervised(LabelModel):
         return TPR, TNR, FPR, FNR
 
 
-    def _get_balanced_idxs(self, marginals, rule):
+    def _get_balanced_idxs(self, marginals_pos, marginals_neg=None, marginals_abstain=None, rule="all", threshold=0.9):
         """
             Get the indices of the verifier scores that are balanced:
             rule: "all", "small", "large"
 
-            all : any verifier with p(y) > 0.1 and p(y) < 0.9
-            small: any verifier with p(y) > 0.5, i.e. predicts mostly 'yes'
-            large: any verifier with p(y) < 0.5, i.e. predicts mostly 'no'
+            all : any verifier with p(y=1) > 0.1 and p(y=1) < 0.9
+                  and not voting heavily -1 (abstain) or heavily 0 (negative)
+            small: any verifier with p(y=1) > 0.5, i.e. predicts mostly 'yes'
+            large: any verifier with p(y=1) < 0.5, i.e. predicts mostly 'no'
+            
+            Also drops verifiers that vote heavily -1 (abstain > threshold) or heavily 0 (negative > threshold)
+            
+            Args:
+                marginals_pos: probability of voting 1 (positive)
+                marginals_neg: probability of voting 0 (negative), optional
+                marginals_abstain: probability of voting -1 (abstain), optional
+                rule: filtering rule
+                threshold: threshold for dropping verifiers that vote too heavily in one direction (default 0.9)
         """
+        n_verifiers = len(marginals_pos)
+        balanced_mask = np.ones(n_verifiers, dtype=bool)
+        
+        # First apply rule-based filtering on positive votes
         if rule == "all":
-            balanced_idxs = np.where((marginals > 0.1) & (marginals < 0.9))[0]
+            balanced_mask = balanced_mask & (marginals_pos > 1.0 - threshold) & (marginals_pos < threshold)
         elif rule == "small":
-            balanced_idxs = np.where(marginals > 0.5)[0]
+            balanced_mask = balanced_mask & (marginals_pos > 0.5)
         elif rule == "large":
-            balanced_idxs = np.where(marginals < 0.5)[0]
-        else: # Use all indices if not specified
-            balanced_idxs = np.arange(len(marginals))
+            balanced_mask = balanced_mask & (marginals_pos < 0.5)
+        # else: keep all (no filtering)
+        
+        # Drop verifiers that vote too heavily in any single direction
+        # This ensures we don't keep verifiers that are too extreme, even if they pass the rule filter
+        if marginals_abstain is not None:
+            # Drop verifiers that abstain too much (> threshold)
+            balanced_mask = balanced_mask & (marginals_abstain < threshold)
+        
+        if marginals_neg is not None:
+            # Drop verifiers that vote negative too much (> threshold)
+            balanced_mask = balanced_mask & (marginals_neg < threshold)
+        
+        # Drop verifiers that vote positive too much (> threshold)
+        # For "all" rule this is redundant (already checked < 0.9), but ensures consistency for other rules
+        balanced_mask = balanced_mask & (marginals_pos < threshold)
+        
+        balanced_idxs = np.where(balanced_mask)[0]
 
         # Fallback: if filtering removes everything, use all verifier
         if getattr(self, "drop_imbalanced_fallback", False) and len(balanced_idxs) == 0:
             print(f"WARNING: Rule '{rule}' dropped all verifiers — falling back to using all.", flush=True)
-            balanced_idxs = np.arange(len(marginals))
+            balanced_idxs = np.arange(n_verifiers)
 
         return balanced_idxs
 
@@ -1388,12 +1425,28 @@ class WeakSupervised(LabelModel):
             else:
                 rule = self.drop_imbalanced_verifiers
 
-            marginals = X.mean(axis=0)  # Use all data for marginals calculation
-            print(f"Marginals: {marginals}", flush=True)
-            balanced_idxs = self._get_balanced_idxs(marginals, rule)
+            # print("X:\n", X, flush=True)
+            # Compute marginals for all vote types: -1 (abstain), 0 (negative), 1 (positive)
+            # X has values -1, 0, 1
+            marginals_pos = (X == 1).mean(axis=0)  # Probability of voting 1 (positive)
+            marginals_neg = (X == 0).mean(axis=0)  # Probability of voting 0 (negative)
+            marginals_abstain = (X == -1).mean(axis=0)  # Probability of voting -1 (abstain)
+            # print(f"Marginals (positive): {marginals_pos}", flush=True)
+            # print(f"Marginals (negative): {marginals_neg}", flush=True)
+            # print(f"Marginals (abstain): {marginals_abstain}", flush=True)
+            
+            # Get threshold for dropping extreme verifiers (default 0.9)
+            drop_threshold = getattr(self, 'drop_extreme_threshold', 0.9)
+            balanced_idxs = self._get_balanced_idxs(
+                marginals_pos, 
+                marginals_neg=marginals_neg, 
+                marginals_abstain=marginals_abstain, 
+                rule=rule,
+                threshold=drop_threshold
+            )
             discarded_names = [v for i, v in enumerate(self.verifier_names) if i not in balanced_idxs]
             balanced_names = [v for i, v in enumerate(self.verifier_names) if i in balanced_idxs]
-            print(f"Discarding {len(discarded_names)}/{X.shape[1]} verifiers: {discarded_names}", flush=True)
+            print(f"[models.py] Discarding {len(discarded_names)}/{X.shape[1]} verifiers: {discarded_names}", flush=True)
             X = X[:, balanced_idxs]  # Apply to full X
             self.verifier_idxs = balanced_idxs
         else:
