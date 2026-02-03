@@ -1236,6 +1236,9 @@ class VerificationDataset:
         # we want to load the task data
         df, correct_key, all_verifiers = self.load_task_data()
         y_data = np.stack(df[correct_key].values).astype(int)
+        if y_data.ndim == 1:
+            # One sample per problem: (num_problems,) -> (num_problems, 1)
+            y_data = y_data[:, np.newaxis]
         # print("verifier_names:", verifier_names)
 
         print(f"Number of problems: {len(y_data)} and samples: {len(y_data[0])}", flush=True)
@@ -1254,6 +1257,9 @@ class VerificationDataset:
             verifier_names.append(verifier)
             verifier_matrices.append(raw_scores)
         X_data = np.stack(verifier_matrices, axis=-1)  # shape: (num_problems, num_responses, num_verifiers)
+        if X_data.ndim == 2:
+            # Only one response per problem: (num_problems, num_verifiers) -> (num_problems, 1, num_verifiers)
+            X_data = X_data[:, np.newaxis, :]
 
         if self.dataset_name == "GPQA-Diamond":
             # use only a subset of the verifiers
