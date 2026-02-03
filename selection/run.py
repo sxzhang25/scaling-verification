@@ -17,84 +17,6 @@ from rich import print as rprint
 from datasets import load_dataset, load_from_disk, Dataset, DatasetDict
 
 
-# def safe_mkdir(path: Path, max_retries: int = 3):
-#     """
-#     Safely create a directory, handling race conditions and permission errors.
-#     Never raises an error - always returns, even if directory creation fails.
-    
-#     Args:
-#         path: Path to the directory to create
-#         max_retries: Maximum number of retry attempts
-#     """
-#     import time
-    
-#     try:
-#         # First, check if directory already exists - if so, we're done
-#         try:
-#             if path.exists() and path.is_dir():
-#                 return
-#         except (PermissionError, OSError):
-#             # Can't check existence due to permissions, but directory might exist
-#             pass
-        
-#         # Check if path exists but is not a directory
-#         try:
-#             if path.exists() and not path.is_dir():
-#                 # Path exists but is not a directory - this is a real problem
-#                 import warnings
-#                 warnings.warn(f"Path {path} exists but is not a directory. Skipping creation.", UserWarning)
-#                 return
-#         except (PermissionError, OSError):
-#             # Can't check, continue to try creating
-#             pass
-        
-#         # Try to create the directory
-#         last_error = None
-#         for attempt in range(max_retries):
-#             try:
-#                 path.mkdir(parents=True, exist_ok=True)
-#                 # Double-check it was created
-#                 try:
-#                     if path.exists() and path.is_dir():
-#                         return
-#                 except (PermissionError, OSError):
-#                     # Can't verify, but mkdir didn't raise, so assume success
-#                     return
-#             except (PermissionError, OSError) as e:
-#                 last_error = e
-#                 # Check if directory was created by another process between the error and now
-#                 try:
-#                     if path.exists() and path.is_dir():
-#                         return
-#                 except (PermissionError, OSError):
-#                     pass
-                
-#                 if attempt < max_retries - 1:
-#                     # Wait before retrying
-#                     time.sleep(0.01 * (attempt + 1))
-        
-#         # All retries failed - check one final time if directory exists (race condition)
-#         try:
-#             if path.exists() and path.is_dir():
-#                 return
-#         except (PermissionError, OSError):
-#             pass
-        
-#         # If we get here, we couldn't create the directory
-#         # Log a warning but don't crash - the directory might exist or be created later
-#         import warnings
-#         warnings.warn(f"Could not create directory {path} after {max_retries} attempts. "
-#                       f"Error: {last_error}. Continuing anyway - operations may fail later.", 
-#                       UserWarning)
-#     except Exception as e:
-#         # Catch-all for any unexpected errors - never crash
-#         import warnings
-#         warnings.warn(f"Unexpected error in safe_mkdir for {path}: {e}. Continuing anyway.", UserWarning)
-
-
-# FIGURES_DIR = Path("figures")
-# safe_mkdir(FIGURES_DIR)
-
 def save_weaver_model(model, args):
     """Save Weaver model with all necessary information for reconstruction."""
     # Get the underlying WeakSupervised model
@@ -178,7 +100,7 @@ def save_weaver_model(model, args):
     print(f"  Verifier names: {[ws_model.verifier_names[i] for i in ws_model.verifier_idxs]}")
 
 def save_weaver_scores(all_test_results, output_path):
-    """Save Weaver scores to CSV file."""
+    """Save Weaver scores to JSON file."""
     positive_samples = []
     negative_samples = []
     
@@ -715,7 +637,6 @@ def train(args):
     console.print(f"\n[bold green]✅ Training and evaluation complete![/bold green]")
     
     if args.data_cfg.get('save_weaver_scores', False):
-        # save_weaver_scores_to_dataset(data, model, df_test, args)
         save_weaver_scores(df_test, args.data_cfg.scores_path)
 
     if args.data_cfg.get('save_weaver_model', False):
