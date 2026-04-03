@@ -1035,7 +1035,6 @@ class WeakSupervised(LabelModel):
             print(f"Parsing dev set file: {kwargs.get('dev_set_path')}", flush=True)
             self.dev_set_indices = self._parse_dev_set_file(kwargs.get("dev_set_path"))
         else:
-            print("No dev set file provided", flush=True)
             self.dev_set_indices = None
         
         # Parse external dev set labels if provided
