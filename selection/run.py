@@ -3,6 +3,7 @@ import pickle
 import json
 import numpy as np
 import pandas as pd
+import h5py
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf
@@ -121,6 +122,42 @@ def save_weaver_scores(all_test_results, output_path):
     with open(output_path, 'w') as f:
         json.dump(results, f)
     print(f"Saved Weaver scores to {output_path}")
+
+
+def save_null_weaver_scores(args):
+    """Write null predictions for every test example."""
+    if not args.data_cfg.get("scores_path", None):
+        return
+
+    dataset_paths_cfg = args.data_cfg.dataset_path
+    if isinstance(dataset_paths_cfg, str):
+        dataset_paths = [dataset_paths_cfg]
+    else:
+        dataset_paths = list(dataset_paths_cfg)
+
+    null_samples = []
+    task_offset = 0
+    for dataset_path in dataset_paths:
+        with h5py.File(dataset_path, "r") as h5f:
+            samples_ds = h5f["samples"]
+            num_tasks, num_samples = samples_ds.shape[0], samples_ds.shape[1]
+
+        for task_idx in range(num_tasks):
+            for sample_idx in range(num_samples):
+                null_samples.append((int(task_offset + task_idx), int(sample_idx), None))
+        task_offset += num_tasks
+
+    results = {
+        "positive_samples": [],
+        "negative_samples": [],
+        "null_samples": null_samples,
+    }
+    with open(args.data_cfg.scores_path, "w") as f:
+        json.dump(results, f)
+    print(
+        f"Saved null Weaver scores to {args.data_cfg.scores_path} "
+        f"({len(null_samples)} null predictions across {task_offset} tasks)"
+    )
 
 def save_weaver_scores_to_dataset(data, model, all_test_results, args):
     """Save Weaver scores/probabilities to dataset for distillation."""
@@ -449,7 +486,9 @@ def main(args) -> None:
         with open(args.verifier_cfg.verifier_subset, 'r') as f:
             verifier_names = [line.strip() for line in f.readlines()]
         if len(verifier_names) == 0:
-            print("No verifiers found in the subset file. Exiting...")
+            print("No verifiers found in the subset file. Writing null predictions for all examples.")
+            if args.data_cfg.get("save_weaver_scores", False):
+                save_null_weaver_scores(args)
             return
 
     print("W&B config: ", args.wandb_cfg)
