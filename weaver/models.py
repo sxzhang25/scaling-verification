@@ -1458,17 +1458,25 @@ class WeakSupervised(LabelModel):
         # Get the class balance:
         # When on the training set or if we are using labels on the test set:
         if (not self.is_test) or self.use_label_on_test:
-            cb_args = self.cb_args.class_balance 
+            cb_args = self.cb_args.class_balance
         else:
-            cb_args = 0.5
+            raw_cb = getattr(self.cb_args, "class_balance", 0.5)
+            if isinstance(raw_cb, (int, float)) and not isinstance(raw_cb, bool):
+                cb_args = float(raw_cb)
+            else:
+                cb_args = 0.5
 
-        if type(cb_args) == str and cb_args == "labels":
-            mean_correctness = y_subset.mean()  # Use subset for class balance calculation
-            class_balance = np.asarray([1- mean_correctness, mean_correctness])
-        elif type(cb_args) == float:
-            class_balance = np.asarray([1- cb_args, cb_args])
+        if str(cb_args).strip().lower() == "labels":
+            mean_correctness = float(np.asarray(y_subset, dtype=np.float64).mean())
+            class_balance = np.asarray([1.0 - mean_correctness, mean_correctness])
+            # Persisted at save time as dev_set_class_balance / training_class_balance (pickle)
+            self._last_label_class_balance_p1 = mean_correctness
         else:
-            raise ValueError(f"Unknown class balance: {cb_args}")
+            try:
+                cbf = float(cb_args)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Unknown class balance: {cb_args}") from e
+            class_balance = np.asarray([1.0 - cbf, cbf])
         
         if self.use_tensor_decomp:
             print("Estimating class balance using tensor decomposition method.")

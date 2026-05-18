@@ -92,7 +92,34 @@ def save_weaver_model(model, args):
             }
     
     saved_model["verifier_params"] = verifier_params
-    
+
+    cb = getattr(ws_model, "cb_args", None)
+    cb_val = getattr(cb, "class_balance", None) if cb is not None and hasattr(cb, "class_balance") else None
+
+    dev_p1 = None
+    dev_labels = getattr(ws_model, "dev_set_labels", None)
+    if dev_labels is not None:
+        dl = np.asarray(dev_labels, dtype=np.float64).ravel()
+        if dl.size > 0:
+            dev_p1 = float(np.clip(np.mean(dl), 0.0, 1.0))
+    if dev_p1 is None:
+        fit_p1 = getattr(ws_model, "_last_label_class_balance_p1", None)
+        if fit_p1 is not None:
+            dev_p1 = float(fit_p1)
+    if dev_p1 is not None:
+        saved_model["dev_set_class_balance"] = dev_p1
+
+    cb_str = None if cb_val is None else str(cb_val).strip().lower()
+    if cb_str == "labels":
+        if dev_p1 is not None:
+            saved_model["training_class_balance"] = float(dev_p1)
+    else:
+        if not isinstance(cb_val, bool):
+            try:
+                saved_model["training_class_balance"] = float(cb_val)
+            except (TypeError, ValueError):
+                pass
+
     with open(args.data_cfg.model_path, "wb") as f:
         pickle.dump(saved_model, f)
     
